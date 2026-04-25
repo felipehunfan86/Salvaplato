@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import WelcomeScreen from './src/screens/auth/WelcomeScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
 import RegisterScreen from './src/screens/auth/RegisterScreen';
@@ -20,20 +20,11 @@ import RestaurantManageOffersScreen from './src/screens/restaurant/RestaurantMan
 import RestaurantOrdersScreen from './src/screens/restaurant/RestaurantOrdersScreen';
 import RestaurantQRScannerScreen from './src/screens/restaurant/RestaurantQRScannerScreen';
 import RestaurantProfileScreen from './src/screens/restaurant/RestaurantProfileScreen';
-
-type Offer = {
-  id: string;
-  restaurantName: string;
-  restaurantCategory: string;
-  productName: string;
-  description: string;
-  originalPrice: number;
-  offerPrice: number;
-  unitsLeft: number;
-  pickupDeadline: string;
-  distance: string;
-  emoji: string;
-};
+import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
+import {
+  apiRequest, clearAuth, getSavedUser, StoredUser, AppOffer,
+} from './src/services/api';
 
 type Screen =
   | 'welcome' | 'login' | 'register'
@@ -47,47 +38,119 @@ function formatDate(d: Date) {
   return d.toLocaleDateString('es-VE', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function makeOrderId() {
-  return `ORD-${Date.now().toString().slice(-6)}`;
+async function registerPushToken() {
+  try {
+    const { status } = await Notifications.requestPermissionsAsync();
+    if (status !== 'granted') return;
+    const tokenData = await Notifications.getExpoPushTokenAsync();
+    await apiRequest('/notifications/tokens', {
+      method: 'POST',
+      body: JSON.stringify({ token: tokenData.data }),
+    });
+  } catch {
+    // No bloquear el flujo si falla
+  }
 }
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('welcome');
-  const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userName, setUserName] = useState('');
+  const [selectedOffer, setSelectedOffer] = useState<AppOffer | null>(null);
+  const [currentUser, setCurrentUser] = useState<StoredUser | null>(null);
   const [restaurantName, setRestaurantName] = useState('');
   const [orders, setOrders] = useState<Order[]>([]);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [activeQrToken, setActiveQrToken] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<{ restaurantName: string; restaurantCategory: string }[]>([]);
   const [filterRestaurant, setFilterRestaurant] = useState<string | undefined>(undefined);
   const [favoriteNotifications, setFavoriteNotifications] = useState<string[]>([]);
 
+  // Auto-login al iniciar
+  useEffect(() => {
+    getSavedUser().then(user => {
+      if (user) {
+        setCurrentUser(user);
+        setScreen('explore');
+      }
+    });
+  }, []);
+
+  const isLoggedIn = !!currentUser;
   const goToExplore = () => setScreen('explore');
   const goToDashboard = () => setScreen('restaurantDashboard');
 
   const activeOrders = orders.filter(o => o.status === 'pendiente');
   const currentQROrder = orders.find(o => o.orderId === activeOrderId) ?? null;
 
-  const handlePaymentSuccess = () => {
+  const handleAuthSuccess = (user: StoredUser) => {
+    setCurrentUser(user);
+    registerPushToken();
+    setScreen(selectedOffer ? 'offerDetail' : 'explore');
+  };
+
+  const handleLogout = async () => {
+    await clearAuth();
+    setCurrentUser(null);
+    setOrders([]);
+    setFavorites([]);
+    setScreen('welcome');
+  };
+
+  const handlePaymentSuccess = async () => {
     if (!selectedOffer) return;
-    const orderId = makeOrderId();
-    const newOrder: Order = {
-      orderId,
-      offer: {
-        id: selectedOffer.id,
-        restaurantName: selectedOffer.restaurantName,
-        productName: selectedOffer.productName,
-        offerPrice: selectedOffer.offerPrice,
-        pickupDeadline: selectedOffer.pickupDeadline,
-        emoji: selectedOffer.emoji,
-      },
-      status: 'pendiente',
-      createdAt: formatDate(new Date()),
-    };
-    setOrders(prev => [...prev, newOrder]);
-    setActiveOrderId(orderId);
-    setScreen('qr');
+    try {
+      const order = await apiRequest<{ id: string; order_code: string; qr_token: string }>('/orders', {
+        method: 'POST',
+        body: JSON.stringify({ offerId: selectedOffer.id, quantity: 1 }),
+      });
+
+      const newOrder: Order = {
+        orderId: order.order_code,
+        offer: {
+          id: selectedOffer.id,
+          restaurantName: selectedOffer.restaurantName,
+          productName: selectedOffer.productName,
+          offerPrice: selectedOffer.offerPrice,
+          pickupDeadline: selectedOffer.pickupDeadline,
+          emoji: selectedOffer.emoji,
+        },
+        status: 'pendiente',
+        createdAt: formatDate(new Date()),
+      };
+      setOrders(prev => [...prev, newOrder]);
+      setActiveOrderId(order.order_code);
+      setActiveQrToken(order.qr_token);
+      setScreen('qr');
+    } catch (e: any) {
+      // En caso de error de red, crear orden local como fallback
+      const orderId = `SP-${Date.now().toString().slice(-5)}`;
+      const newOrder: Order = {
+        orderId,
+        offer: {
+          id: selectedOffer.id,
+          restaurantName: selectedOffer.restaurantName,
+          productName: selectedOffer.productName,
+          offerPrice: selectedOffer.offerPrice,
+          pickupDeadline: selectedOffer.pickupDeadline,
+          emoji: selectedOffer.emoji,
+        },
+        status: 'pendiente',
+        createdAt: formatDate(new Date()),
+      };
+      setOrders(prev => [...prev, newOrder]);
+      setActiveOrderId(orderId);
+      setActiveQrToken(null);
+      setScreen('qr');
+    }
   };
 
   const handleScanSuccess = (orderId: string) => {
@@ -108,7 +171,6 @@ export default function App() {
         : [...prev, { restaurantName, restaurantCategory }]
     );
     if (!isAlready) {
-      // Simular notificación de nueva oferta tras 8 segundos
       setTimeout(() => {
         setFavoriteNotifications(prev =>
           prev.includes(restaurantName) ? prev : [...prev, restaurantName]
@@ -130,7 +192,7 @@ export default function App() {
   if (screen === 'login') {
     return (
       <LoginScreen
-        onLogin={(email) => { setIsLoggedIn(true); setUserName(email); setScreen(selectedOffer ? 'offerDetail' : 'explore'); }}
+        onLogin={handleAuthSuccess}
         onRegister={() => setScreen('register')}
         onBack={() => setScreen(selectedOffer ? 'offerDetail' : 'welcome')}
         onForgotPassword={() => {}}
@@ -141,7 +203,7 @@ export default function App() {
   if (screen === 'register') {
     return (
       <RegisterScreen
-        onRegister={(data) => { setIsLoggedIn(true); setUserName(data.fullName); setScreen(selectedOffer ? 'offerDetail' : 'explore'); }}
+        onRegister={handleAuthSuccess}
         onLogin={() => setScreen('login')}
         onBack={() => setScreen('welcome')}
       />
@@ -189,6 +251,7 @@ export default function App() {
       <QRScreen
         offer={selectedOffer}
         orderId={activeOrderId}
+        qrToken={activeQrToken ?? undefined}
         onGoHome={goToExplore}
         onScanSuccess={handleScanSuccess}
         onRateOrder={handleRateOrder}
@@ -219,7 +282,7 @@ export default function App() {
         favorites={favorites}
         favoriteNotifications={favoriteNotifications}
         onBack={goToExplore}
-        onLogout={() => { setIsLoggedIn(false); setUserName(''); setScreen('welcome'); }}
+        onLogout={handleLogout}
         onEditProfile={() => setScreen('editProfile')}
         onNotifications={() => setScreen('notifications')}
         onLocation={() => setScreen('location')}
@@ -248,7 +311,7 @@ export default function App() {
         onRestaurantPress={(name) => setFilterRestaurant(name)}
         favoriteNotifications={favoriteNotifications}
         isLoggedIn={isLoggedIn}
-        userName={userName}
+        userName={currentUser?.full_name}
       />
     );
   }
@@ -267,7 +330,7 @@ export default function App() {
   if (screen === 'restaurantDashboard') {
     return (
       <RestaurantDashboardScreen
-        businessName={restaurantName || 'Pizzería Don Pepe'}
+        businessName={restaurantName || 'Mi Restaurante'}
         onPublishOffer={() => setScreen('restaurantPublishOffer')}
         onManageOffers={() => setScreen('restaurantManageOffers')}
         onOrders={() => setScreen('restaurantOrders')}

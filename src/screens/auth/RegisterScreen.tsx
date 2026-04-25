@@ -10,12 +10,14 @@ import {
   ScrollView,
   Platform,
   KeyboardAvoidingView,
+  ActivityIndicator,
 } from 'react-native';
 import { colors, spacing, borderRadius, typography } from '../../theme';
 import ZoneAutocomplete from '../../components/ZoneAutocomplete';
+import { apiRequest, saveAuth, StoredUser } from '../../services/api';
 
 type Props = {
-  onRegister: (data: RegisterData) => void;
+  onRegister: (user: StoredUser) => void;
   onLogin: () => void;
   onBack: () => void;
 };
@@ -36,7 +38,8 @@ export default function RegisterScreen({ onRegister, onLogin, onBack }: Props) {
   const [phone, setPhone] = useState('');
   const [city, setCity] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [errors, setErrors] = useState<Partial<RegisterData & { confirmPassword: string }>>({});
+  const [errors, setErrors] = useState<Partial<RegisterData & { confirmPassword: string; api: string }>>({});
+  const [loading, setLoading] = useState(false);
 
   const validate = () => {
     const newErrors: typeof errors = {};
@@ -50,9 +53,36 @@ export default function RegisterScreen({ onRegister, onLogin, onBack }: Props) {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     if (!validate()) return;
-    onRegister({ fullName, email, password, phone, city });
+    setLoading(true);
+    setErrors({});
+    try {
+      type AuthResult = { session: { access_token: string }; user: { id: string; email: string } };
+      const data = await apiRequest<AuthResult>('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          fullName: fullName.trim(),
+          phone: phone.trim(),
+          zone: city.trim(),
+        }),
+      });
+      const user: StoredUser = {
+        id: data.user.id,
+        email: data.user.email,
+        full_name: fullName.trim(),
+        phone: phone.trim(),
+        zone: city.trim(),
+      };
+      await saveAuth(data.session.access_token, user);
+      onRegister(user);
+    } catch (e: any) {
+      setErrors({ api: e.message ?? 'Error al crear la cuenta' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -134,8 +164,12 @@ export default function RegisterScreen({ onRegister, onLogin, onBack }: Props) {
               <Text style={styles.termsLink}>Política de privacidad</Text>.
             </Text>
 
-            <TouchableOpacity style={styles.btnPrimary} onPress={handleRegister}>
-              <Text style={styles.btnPrimaryText}>Crear cuenta</Text>
+            {errors.api ? <Text style={{ color: colors.error, textAlign: 'center', marginBottom: spacing.sm, ...typography.caption }}>{errors.api}</Text> : null}
+            <TouchableOpacity style={[styles.btnPrimary, loading && { backgroundColor: colors.border }]} onPress={handleRegister} disabled={loading}>
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={styles.btnPrimaryText}>Crear cuenta</Text>
+              }
             </TouchableOpacity>
           </View>
 

@@ -10,29 +10,52 @@ import {
   ScrollView,
   Platform,
   KeyboardAvoidingView,
+  ActivityIndicator,
 } from 'react-native';
 import { colors, spacing, borderRadius, typography } from '../../theme';
+import { apiRequest, saveAuth, StoredUser } from '../../services/api';
+
+type AuthResult = { session: { access_token: string }; user: { id: string; email: string; user_metadata?: { full_name?: string; phone?: string } } };
 
 type Props = {
-  onLogin: (email: string, password: string) => void;
+  onLogin: (user: StoredUser) => void;
   onRegister: () => void;
   onBack: () => void;
   onForgotPassword: () => void;
 };
 
 export default function LoginScreen({ onLogin, onRegister, onBack, onForgotPassword }: Props) {
-  const [email, setEmail] = useState('demo@salvaplato.com');
-  const [password, setPassword] = useState('demo123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       setError('Por favor completa todos los campos.');
       return;
     }
+    setLoading(true);
     setError('');
-    onLogin(email.trim(), password);
+    try {
+      const data = await apiRequest<AuthResult>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const user: StoredUser = {
+        id: data.user.id,
+        email: data.user.email,
+        full_name: data.user.user_metadata?.full_name ?? data.user.email,
+        phone: data.user.user_metadata?.phone,
+      };
+      await saveAuth(data.session.access_token, user);
+      onLogin(user);
+    } catch (e: any) {
+      setError(e.message ?? 'Error al iniciar sesión');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -84,8 +107,11 @@ export default function LoginScreen({ onLogin, onRegister, onBack, onForgotPassw
               <Text style={styles.forgotText}>¿Olvidaste tu contraseña?</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.btnPrimary} onPress={handleLogin}>
-              <Text style={styles.btnPrimaryText}>Iniciar sesión</Text>
+            <TouchableOpacity style={[styles.btnPrimary, loading && styles.btnDisabled]} onPress={handleLogin} disabled={loading}>
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={styles.btnPrimaryText}>Iniciar sesión</Text>
+              }
             </TouchableOpacity>
           </View>
 
@@ -231,6 +257,7 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   btnPrimaryText: { ...typography.button, color: colors.textLight },
+  btnDisabled: { backgroundColor: colors.border },
   registerRow: {
     flexDirection: 'row',
     justifyContent: 'center',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Location from 'expo-location';
+import { apiRequest, ApiOffer, AppOffer, mapApiOffer } from '../../services/api';
 
 const ZONES = [
   'Altamira', 'La Castellana', 'Las Mercedes', 'Chacao', 'El Rosal',
@@ -28,70 +29,58 @@ const ZONES = [
 ];
 import { colors, spacing, borderRadius, typography } from '../../theme';
 
-type Offer = {
-  id: string;
-  restaurantName: string;
-  restaurantCategory: string;
-  productName: string;
-  description: string;
-  originalPrice: number;
-  offerPrice: number;
-  unitsLeft: number;
-  pickupDeadline: string;
-  distance: string;
-  emoji: string;
-};
+type Offer = AppOffer; // alias local para compatibilidad con MOCK_OFFERS
 
-const MOCK_OFFERS: Offer[] = [
+const MOCK_OFFERS: AppOffer[] = [
   // ── Panadería El Trigal (popular) ──────────────────────────────────────────
-  { id: '1',  restaurantName: 'Panadería El Trigal',    restaurantCategory: 'Panadería',     productName: 'Pack de 6 croissants',       description: 'Croissants de mantequilla horneados esta mañana',            originalPrice: 4.0,  offerPrice: 1.5, unitsLeft: 3, pickupDeadline: '8:00 PM', distance: '0.4 km', emoji: '🥐' },
-  { id: '2',  restaurantName: 'Panadería El Trigal',    restaurantCategory: 'Panadería',     productName: 'Pan de jamón familiar',      description: 'Pan de jamón artesanal con aceitunas y pasas',               originalPrice: 7.0,  offerPrice: 3.0, unitsLeft: 2, pickupDeadline: '7:30 PM', distance: '0.4 km', emoji: '🍞' },
-  { id: '3',  restaurantName: 'Panadería El Trigal',    restaurantCategory: 'Panadería',     productName: 'Caja de 12 ponquesitos',     description: 'Ponquesitos de vainilla y chocolate del día',                originalPrice: 5.0,  offerPrice: 2.0, unitsLeft: 4, pickupDeadline: '6:00 PM', distance: '0.4 km', emoji: '🧁' },
-  { id: '4',  restaurantName: 'Pan de Casa',            restaurantCategory: 'Panadería',     productName: 'Baguette artesanal x3',      description: 'Baguettes recién horneadas, corteza crujiente',              originalPrice: 3.5,  offerPrice: 1.2, unitsLeft: 5, pickupDeadline: '7:00 PM', distance: '0.9 km', emoji: '🥖' },
-  { id: '5',  restaurantName: 'Dulces y Más',           restaurantCategory: 'Panadería',     productName: 'Torta de zanahoria entera',  description: 'Torta de zanahoria con frosting de queso crema',             originalPrice: 9.0,  offerPrice: 4.0, unitsLeft: 1, pickupDeadline: '8:30 PM', distance: '1.3 km', emoji: '🎂' },
+  { id: '1',  restaurantId: '', restaurantName: 'Panadería El Trigal',    restaurantCategory: 'Panadería',     productName: 'Pack de 6 croissants',       description: 'Croissants de mantequilla horneados esta mañana',            originalPrice: 4.0,  offerPrice: 1.5, unitsLeft: 3, pickupDeadline: '8:00 PM', distance: '0.4 km', emoji: '🥐' },
+  { id: '2', restaurantId: '', restaurantName: 'Panadería El Trigal',    restaurantCategory: 'Panadería',     productName: 'Pan de jamón familiar',      description: 'Pan de jamón artesanal con aceitunas y pasas',               originalPrice: 7.0,  offerPrice: 3.0, unitsLeft: 2, pickupDeadline: '7:30 PM', distance: '0.4 km', emoji: '🍞' },
+  { id: '3', restaurantId: '', restaurantName: 'Panadería El Trigal',    restaurantCategory: 'Panadería',     productName: 'Caja de 12 ponquesitos',     description: 'Ponquesitos de vainilla y chocolate del día',                originalPrice: 5.0,  offerPrice: 2.0, unitsLeft: 4, pickupDeadline: '6:00 PM', distance: '0.4 km', emoji: '🧁' },
+  { id: '4', restaurantId: '', restaurantName: 'Pan de Casa',            restaurantCategory: 'Panadería',     productName: 'Baguette artesanal x3',      description: 'Baguettes recién horneadas, corteza crujiente',              originalPrice: 3.5,  offerPrice: 1.2, unitsLeft: 5, pickupDeadline: '7:00 PM', distance: '0.9 km', emoji: '🥖' },
+  { id: '5', restaurantId: '', restaurantName: 'Dulces y Más',           restaurantCategory: 'Panadería',     productName: 'Torta de zanahoria entera',  description: 'Torta de zanahoria con frosting de queso crema',             originalPrice: 9.0,  offerPrice: 4.0, unitsLeft: 1, pickupDeadline: '8:30 PM', distance: '1.3 km', emoji: '🎂' },
 
   // ── Restaurante La Cazuela (popular) ───────────────────────────────────────
-  { id: '6',  restaurantName: 'Restaurante La Cazuela', restaurantCategory: 'Venezolana',    productName: 'Bandeja del día',            description: 'Pabellón criollo completo con jugo natural',                 originalPrice: 8.0,  offerPrice: 3.5, unitsLeft: 2, pickupDeadline: '3:00 PM', distance: '0.8 km', emoji: '🍛' },
-  { id: '7',  restaurantName: 'Restaurante La Cazuela', restaurantCategory: 'Venezolana',    productName: 'Asado negro + arroz',        description: 'Asado negro venezolano con arroz blanco y tajadas',          originalPrice: 10.0, offerPrice: 4.5, unitsLeft: 3, pickupDeadline: '4:00 PM', distance: '0.8 km', emoji: '🥩' },
-  { id: '8',  restaurantName: 'Restaurante La Cazuela', restaurantCategory: 'Venezolana',    productName: 'Sancocho de gallina',        description: 'Sancocho casero con verduras y yuca fresca',                 originalPrice: 7.0,  offerPrice: 3.0, unitsLeft: 4, pickupDeadline: '2:30 PM', distance: '0.8 km', emoji: '🍲' },
-  { id: '9',  restaurantName: 'La Cocina de Abuela',    restaurantCategory: 'Venezolana',    productName: 'Hallacas x6',                description: 'Hallacas tradicionales, envueltas en hojas de plátano',      originalPrice: 12.0, offerPrice: 5.0, unitsLeft: 2, pickupDeadline: '5:00 PM', distance: '1.4 km', emoji: '🫔' },
-  { id: '10', restaurantName: 'Arepa Bar Chacao',       restaurantCategory: 'Venezolana',    productName: 'Pack 4 arepas rellenas',     description: 'Pelúa, dominó, reina pepiada y sifrina',                     originalPrice: 6.0,  offerPrice: 2.5, unitsLeft: 6, pickupDeadline: '9:00 PM', distance: '0.6 km', emoji: '🫓' },
+  { id: '6', restaurantId: '', restaurantName: 'Restaurante La Cazuela', restaurantCategory: 'Venezolana',    productName: 'Bandeja del día',            description: 'Pabellón criollo completo con jugo natural',                 originalPrice: 8.0,  offerPrice: 3.5, unitsLeft: 2, pickupDeadline: '3:00 PM', distance: '0.8 km', emoji: '🍛' },
+  { id: '7', restaurantId: '', restaurantName: 'Restaurante La Cazuela', restaurantCategory: 'Venezolana',    productName: 'Asado negro + arroz',        description: 'Asado negro venezolano con arroz blanco y tajadas',          originalPrice: 10.0, offerPrice: 4.5, unitsLeft: 3, pickupDeadline: '4:00 PM', distance: '0.8 km', emoji: '🥩' },
+  { id: '8', restaurantId: '', restaurantName: 'Restaurante La Cazuela', restaurantCategory: 'Venezolana',    productName: 'Sancocho de gallina',        description: 'Sancocho casero con verduras y yuca fresca',                 originalPrice: 7.0,  offerPrice: 3.0, unitsLeft: 4, pickupDeadline: '2:30 PM', distance: '0.8 km', emoji: '🍲' },
+  { id: '9', restaurantId: '', restaurantName: 'La Cocina de Abuela',    restaurantCategory: 'Venezolana',    productName: 'Hallacas x6',                description: 'Hallacas tradicionales, envueltas en hojas de plátano',      originalPrice: 12.0, offerPrice: 5.0, unitsLeft: 2, pickupDeadline: '5:00 PM', distance: '1.4 km', emoji: '🫔' },
+  { id: '10', restaurantId: '', restaurantName: 'Arepa Bar Chacao',       restaurantCategory: 'Venezolana',    productName: 'Pack 4 arepas rellenas',     description: 'Pelúa, dominó, reina pepiada y sifrina',                     originalPrice: 6.0,  offerPrice: 2.5, unitsLeft: 6, pickupDeadline: '9:00 PM', distance: '0.6 km', emoji: '🫓' },
 
   // ── Pizza Roma (popular) ───────────────────────────────────────────────────
-  { id: '11', restaurantName: 'Pizza Roma',             restaurantCategory: 'Italiana',      productName: '2 pizzas medianas',          description: 'Margarita y pepperoni, recién horneadas',                    originalPrice: 12.0, offerPrice: 5.0, unitsLeft: 1, pickupDeadline: '9:00 PM', distance: '1.2 km', emoji: '🍕' },
-  { id: '12', restaurantName: 'Pizza Roma',             restaurantCategory: 'Italiana',      productName: 'Pasta boloñesa x2',          description: 'Pasta al dente con salsa boloñesa casera',                   originalPrice: 9.0,  offerPrice: 3.5, unitsLeft: 3, pickupDeadline: '9:30 PM', distance: '1.2 km', emoji: '🍝' },
-  { id: '13', restaurantName: 'Pizza Roma',             restaurantCategory: 'Italiana',      productName: 'Lasaña familiar',            description: 'Lasaña de carne y queso, porción para 3 personas',           originalPrice: 14.0, offerPrice: 6.0, unitsLeft: 2, pickupDeadline: '8:45 PM', distance: '1.2 km', emoji: '🫕' },
-  { id: '14', restaurantName: 'Trattoria Venezia',      restaurantCategory: 'Italiana',      productName: 'Risotto de champiñones',     description: 'Risotto cremoso con champiñones silvestres y parmesano',     originalPrice: 11.0, offerPrice: 4.5, unitsLeft: 2, pickupDeadline: '8:00 PM', distance: '1.8 km', emoji: '🍚' },
-  { id: '15', restaurantName: 'Il Forno',               restaurantCategory: 'Italiana',      productName: 'Focaccia x4 porciones',      description: 'Focaccia con aceitunas, romero y tomates cherry',            originalPrice: 5.0,  offerPrice: 2.0, unitsLeft: 4, pickupDeadline: '7:30 PM', distance: '2.2 km', emoji: '🫓' },
+  { id: '11', restaurantId: '', restaurantName: 'Pizza Roma',             restaurantCategory: 'Italiana',      productName: '2 pizzas medianas',          description: 'Margarita y pepperoni, recién horneadas',                    originalPrice: 12.0, offerPrice: 5.0, unitsLeft: 1, pickupDeadline: '9:00 PM', distance: '1.2 km', emoji: '🍕' },
+  { id: '12', restaurantId: '', restaurantName: 'Pizza Roma',             restaurantCategory: 'Italiana',      productName: 'Pasta boloñesa x2',          description: 'Pasta al dente con salsa boloñesa casera',                   originalPrice: 9.0,  offerPrice: 3.5, unitsLeft: 3, pickupDeadline: '9:30 PM', distance: '1.2 km', emoji: '🍝' },
+  { id: '13', restaurantId: '', restaurantName: 'Pizza Roma',             restaurantCategory: 'Italiana',      productName: 'Lasaña familiar',            description: 'Lasaña de carne y queso, porción para 3 personas',           originalPrice: 14.0, offerPrice: 6.0, unitsLeft: 2, pickupDeadline: '8:45 PM', distance: '1.2 km', emoji: '🫕' },
+  { id: '14', restaurantId: '', restaurantName: 'Trattoria Venezia',      restaurantCategory: 'Italiana',      productName: 'Risotto de champiñones',     description: 'Risotto cremoso con champiñones silvestres y parmesano',     originalPrice: 11.0, offerPrice: 4.5, unitsLeft: 2, pickupDeadline: '8:00 PM', distance: '1.8 km', emoji: '🍚' },
+  { id: '15', restaurantId: '', restaurantName: 'Il Forno',               restaurantCategory: 'Italiana',      productName: 'Focaccia x4 porciones',      description: 'Focaccia con aceitunas, romero y tomates cherry',            originalPrice: 5.0,  offerPrice: 2.0, unitsLeft: 4, pickupDeadline: '7:30 PM', distance: '2.2 km', emoji: '🫓' },
 
   // ── Café Central (popular) ─────────────────────────────────────────────────
-  { id: '16', restaurantName: 'Café Central',           restaurantCategory: 'Cafetería',     productName: 'Box de postres',             description: 'Variedad de tortas y galletas del día',                      originalPrice: 6.0,  offerPrice: 2.5, unitsLeft: 5, pickupDeadline: '7:00 PM', distance: '1.5 km', emoji: '🍰' },
-  { id: '17', restaurantName: 'Café Central',           restaurantCategory: 'Cafetería',     productName: 'Desayuno completo x2',       description: 'Café, jugo, tostadas con mantequilla y mermelada',           originalPrice: 8.0,  offerPrice: 3.0, unitsLeft: 3, pickupDeadline: '11:00 AM', distance: '1.5 km', emoji: '☕' },
-  { id: '18', restaurantName: 'Café Central',           restaurantCategory: 'Cafetería',     productName: 'Muffins variados x6',        description: 'Muffins de arándanos, chocolate y limón',                    originalPrice: 5.0,  offerPrice: 2.0, unitsLeft: 4, pickupDeadline: '6:30 PM', distance: '1.5 km', emoji: '🧇' },
-  { id: '19', restaurantName: 'Café del Parque',        restaurantCategory: 'Cafetería',     productName: 'Sandwich club + café',       description: 'Sandwich de pollo con papas y bebida caliente',              originalPrice: 7.0,  offerPrice: 3.0, unitsLeft: 2, pickupDeadline: '5:00 PM', distance: '0.7 km', emoji: '🥪' },
+  { id: '16', restaurantId: '', restaurantName: 'Café Central',           restaurantCategory: 'Cafetería',     productName: 'Box de postres',             description: 'Variedad de tortas y galletas del día',                      originalPrice: 6.0,  offerPrice: 2.5, unitsLeft: 5, pickupDeadline: '7:00 PM', distance: '1.5 km', emoji: '🍰' },
+  { id: '17', restaurantId: '', restaurantName: 'Café Central',           restaurantCategory: 'Cafetería',     productName: 'Desayuno completo x2',       description: 'Café, jugo, tostadas con mantequilla y mermelada',           originalPrice: 8.0,  offerPrice: 3.0, unitsLeft: 3, pickupDeadline: '11:00 AM', distance: '1.5 km', emoji: '☕' },
+  { id: '18', restaurantId: '', restaurantName: 'Café Central',           restaurantCategory: 'Cafetería',     productName: 'Muffins variados x6',        description: 'Muffins de arándanos, chocolate y limón',                    originalPrice: 5.0,  offerPrice: 2.0, unitsLeft: 4, pickupDeadline: '6:30 PM', distance: '1.5 km', emoji: '🧇' },
+  { id: '19', restaurantId: '', restaurantName: 'Café del Parque',        restaurantCategory: 'Cafetería',     productName: 'Sandwich club + café',       description: 'Sandwich de pollo con papas y bebida caliente',              originalPrice: 7.0,  offerPrice: 3.0, unitsLeft: 2, pickupDeadline: '5:00 PM', distance: '0.7 km', emoji: '🥪' },
 
   // ── Sushi Caracas (popular) ────────────────────────────────────────────────
-  { id: '20', restaurantName: 'Sushi Caracas',          restaurantCategory: 'Japonesa',      productName: 'Bandeja de 20 piezas',       description: 'Mix de rolls y nigiri del día',                              originalPrice: 15.0, offerPrice: 6.0, unitsLeft: 2, pickupDeadline: '9:30 PM', distance: '2.1 km', emoji: '🍣' },
-  { id: '21', restaurantName: 'Sushi Caracas',          restaurantCategory: 'Japonesa',      productName: 'Ramen tonkotsu',             description: 'Ramen con caldo de cerdo, chashu y huevo marinado',          originalPrice: 10.0, offerPrice: 4.0, unitsLeft: 3, pickupDeadline: '9:00 PM', distance: '2.1 km', emoji: '🍜' },
-  { id: '22', restaurantName: 'Sushi Caracas',          restaurantCategory: 'Japonesa',      productName: 'Gyozas x10',                 description: 'Gyozas de cerdo y vegetales al vapor o fritas',              originalPrice: 8.0,  offerPrice: 3.0, unitsLeft: 4, pickupDeadline: '8:30 PM', distance: '2.1 km', emoji: '🥟' },
-  { id: '23', restaurantName: 'Tokyo Express',          restaurantCategory: 'Japonesa',      productName: 'Bento box completo',         description: 'Arroz, teriyaki, ensalada y miso',                           originalPrice: 9.0,  offerPrice: 3.5, unitsLeft: 3, pickupDeadline: '8:00 PM', distance: '2.5 km', emoji: '🍱' },
+  { id: '20', restaurantId: '', restaurantName: 'Sushi Caracas',          restaurantCategory: 'Japonesa',      productName: 'Bandeja de 20 piezas',       description: 'Mix de rolls y nigiri del día',                              originalPrice: 15.0, offerPrice: 6.0, unitsLeft: 2, pickupDeadline: '9:30 PM', distance: '2.1 km', emoji: '🍣' },
+  { id: '21', restaurantId: '', restaurantName: 'Sushi Caracas',          restaurantCategory: 'Japonesa',      productName: 'Ramen tonkotsu',             description: 'Ramen con caldo de cerdo, chashu y huevo marinado',          originalPrice: 10.0, offerPrice: 4.0, unitsLeft: 3, pickupDeadline: '9:00 PM', distance: '2.1 km', emoji: '🍜' },
+  { id: '22', restaurantId: '', restaurantName: 'Sushi Caracas',          restaurantCategory: 'Japonesa',      productName: 'Gyozas x10',                 description: 'Gyozas de cerdo y vegetales al vapor o fritas',              originalPrice: 8.0,  offerPrice: 3.0, unitsLeft: 4, pickupDeadline: '8:30 PM', distance: '2.1 km', emoji: '🥟' },
+  { id: '23', restaurantId: '', restaurantName: 'Tokyo Express',          restaurantCategory: 'Japonesa',      productName: 'Bento box completo',         description: 'Arroz, teriyaki, ensalada y miso',                           originalPrice: 9.0,  offerPrice: 3.5, unitsLeft: 3, pickupDeadline: '8:00 PM', distance: '2.5 km', emoji: '🍱' },
 
   // ── Burger House ───────────────────────────────────────────────────────────
-  { id: '24', restaurantName: 'Burger House',           restaurantCategory: 'Hamburguesas', productName: 'Combo doble + papas',        description: 'Doble carne, queso cheddar, bacon y papas medianas',        originalPrice: 10.0, offerPrice: 4.5, unitsLeft: 4, pickupDeadline: '10:00 PM', distance: '1.0 km', emoji: '🍔' },
-  { id: '25', restaurantName: 'Burger House',           restaurantCategory: 'Hamburguesas', productName: 'Hot dogs x4',               description: 'Hot dogs con chili, queso y cebolla caramelizada',           originalPrice: 7.0,  offerPrice: 3.0, unitsLeft: 5, pickupDeadline: '9:45 PM', distance: '1.0 km', emoji: '🌭' },
-  { id: '26', restaurantName: 'Smash & Co.',            restaurantCategory: 'Hamburguesas', productName: 'Smash burger individual',   description: 'Smash burger con doble carne aplastada y queso americano',  originalPrice: 8.0,  offerPrice: 3.5, unitsLeft: 3, pickupDeadline: '10:30 PM', distance: '1.6 km', emoji: '🥩' },
+  { id: '24', restaurantId: '', restaurantName: 'Burger House',           restaurantCategory: 'Hamburguesas', productName: 'Combo doble + papas',        description: 'Doble carne, queso cheddar, bacon y papas medianas',        originalPrice: 10.0, offerPrice: 4.5, unitsLeft: 4, pickupDeadline: '10:00 PM', distance: '1.0 km', emoji: '🍔' },
+  { id: '25', restaurantId: '', restaurantName: 'Burger House',           restaurantCategory: 'Hamburguesas', productName: 'Hot dogs x4',               description: 'Hot dogs con chili, queso y cebolla caramelizada',           originalPrice: 7.0,  offerPrice: 3.0, unitsLeft: 5, pickupDeadline: '9:45 PM', distance: '1.0 km', emoji: '🌭' },
+  { id: '26', restaurantId: '', restaurantName: 'Smash & Co.',            restaurantCategory: 'Hamburguesas', productName: 'Smash burger individual',   description: 'Smash burger con doble carne aplastada y queso americano',  originalPrice: 8.0,  offerPrice: 3.5, unitsLeft: 3, pickupDeadline: '10:30 PM', distance: '1.6 km', emoji: '🥩' },
 
   // ── Mexicana ───────────────────────────────────────────────────────────────
-  { id: '27', restaurantName: 'El Sombrero',            restaurantCategory: 'Mexicana',      productName: 'Pack de 6 tacos',            description: 'Tacos de carne, pollo y vegetariano con salsas',             originalPrice: 9.0,  offerPrice: 3.5, unitsLeft: 4, pickupDeadline: '9:00 PM', distance: '1.7 km', emoji: '🌮' },
-  { id: '28', restaurantName: 'El Sombrero',            restaurantCategory: 'Mexicana',      productName: 'Burrito familiar',           description: 'Burrito XXL con frijoles, guacamole, pico de gallo',         originalPrice: 11.0, offerPrice: 4.5, unitsLeft: 2, pickupDeadline: '8:30 PM', distance: '1.7 km', emoji: '🌯' },
-  { id: '29', restaurantName: 'Azteca Caracas',         restaurantCategory: 'Mexicana',      productName: 'Nachos con guacamole',       description: 'Nachos crocantes con guacamole fresco y jalapeños',          originalPrice: 6.0,  offerPrice: 2.5, unitsLeft: 5, pickupDeadline: '9:30 PM', distance: '2.0 km', emoji: '🫔' },
+  { id: '27', restaurantId: '', restaurantName: 'El Sombrero',            restaurantCategory: 'Mexicana',      productName: 'Pack de 6 tacos',            description: 'Tacos de carne, pollo y vegetariano con salsas',             originalPrice: 9.0,  offerPrice: 3.5, unitsLeft: 4, pickupDeadline: '9:00 PM', distance: '1.7 km', emoji: '🌮' },
+  { id: '28', restaurantId: '', restaurantName: 'El Sombrero',            restaurantCategory: 'Mexicana',      productName: 'Burrito familiar',           description: 'Burrito XXL con frijoles, guacamole, pico de gallo',         originalPrice: 11.0, offerPrice: 4.5, unitsLeft: 2, pickupDeadline: '8:30 PM', distance: '1.7 km', emoji: '🌯' },
+  { id: '29', restaurantId: '', restaurantName: 'Azteca Caracas',         restaurantCategory: 'Mexicana',      productName: 'Nachos con guacamole',       description: 'Nachos crocantes con guacamole fresco y jalapeños',          originalPrice: 6.0,  offerPrice: 2.5, unitsLeft: 5, pickupDeadline: '9:30 PM', distance: '2.0 km', emoji: '🫔' },
 
   // ── Saludable ──────────────────────────────────────────────────────────────
-  { id: '30', restaurantName: 'Green Bowl',             restaurantCategory: 'Saludable',     productName: 'Bowl de quinoa x2',          description: 'Quinoa, aguacate, tomate cherry y aderezo de limón',         originalPrice: 9.0,  offerPrice: 3.5, unitsLeft: 3, pickupDeadline: '6:00 PM', distance: '1.1 km', emoji: '🥗' },
-  { id: '31', restaurantName: 'Green Bowl',             restaurantCategory: 'Saludable',     productName: 'Smoothie bowl x2',           description: 'Smoothie de frutos rojos con granola y semillas',            originalPrice: 7.0,  offerPrice: 2.5, unitsLeft: 4, pickupDeadline: '5:30 PM', distance: '1.1 km', emoji: '🫐' },
-  { id: '32', restaurantName: 'FreshFit Caracas',       restaurantCategory: 'Saludable',     productName: 'Wrap integral x3',           description: 'Wrap de pollo grillado, espinacas y hummus',                 originalPrice: 8.0,  offerPrice: 3.0, unitsLeft: 2, pickupDeadline: '6:30 PM', distance: '1.9 km', emoji: '🥙' },
-  { id: '33', restaurantName: 'FreshFit Caracas',       restaurantCategory: 'Saludable',     productName: 'Ensalada mediterránea',      description: 'Mix de hojas, aceitunas, feta y vinagreta de hierbas',       originalPrice: 6.5,  offerPrice: 2.5, unitsLeft: 5, pickupDeadline: '7:00 PM', distance: '1.9 km', emoji: '🥦' },
-  { id: '34', restaurantName: 'La Arepa de Oro',        restaurantCategory: 'Venezolana',    productName: 'Arepa de cochino x4',        description: 'Arepas rellenas de pernil con guasacaca',                    originalPrice: 8.0,  offerPrice: 3.0, unitsLeft: 3, pickupDeadline: '8:00 PM', distance: '0.5 km', emoji: '🫓' },
+  { id: '30', restaurantId: '', restaurantName: 'Green Bowl',             restaurantCategory: 'Saludable',     productName: 'Bowl de quinoa x2',          description: 'Quinoa, aguacate, tomate cherry y aderezo de limón',         originalPrice: 9.0,  offerPrice: 3.5, unitsLeft: 3, pickupDeadline: '6:00 PM', distance: '1.1 km', emoji: '🥗' },
+  { id: '31', restaurantId: '', restaurantName: 'Green Bowl',             restaurantCategory: 'Saludable',     productName: 'Smoothie bowl x2',           description: 'Smoothie de frutos rojos con granola y semillas',            originalPrice: 7.0,  offerPrice: 2.5, unitsLeft: 4, pickupDeadline: '5:30 PM', distance: '1.1 km', emoji: '🫐' },
+  { id: '32', restaurantId: '', restaurantName: 'FreshFit Caracas',       restaurantCategory: 'Saludable',     productName: 'Wrap integral x3',           description: 'Wrap de pollo grillado, espinacas y hummus',                 originalPrice: 8.0,  offerPrice: 3.0, unitsLeft: 2, pickupDeadline: '6:30 PM', distance: '1.9 km', emoji: '🥙' },
+  { id: '33', restaurantId: '', restaurantName: 'FreshFit Caracas',       restaurantCategory: 'Saludable',     productName: 'Ensalada mediterránea',      description: 'Mix de hojas, aceitunas, feta y vinagreta de hierbas',       originalPrice: 6.5,  offerPrice: 2.5, unitsLeft: 5, pickupDeadline: '7:00 PM', distance: '1.9 km', emoji: '🥦' },
+  { id: '34', restaurantId: '', restaurantName: 'La Arepa de Oro',        restaurantCategory: 'Venezolana',    productName: 'Arepa de cochino x4',        description: 'Arepas rellenas de pernil con guasacaca',                    originalPrice: 8.0,  offerPrice: 3.0, unitsLeft: 3, pickupDeadline: '8:00 PM', distance: '0.5 km', emoji: '🫓' },
 ];
 
 const POPULAR_RESTAURANTS = [
@@ -120,7 +109,7 @@ const CATEGORIES = [
 ];
 
 type Props = {
-  onOfferPress: (offer: Offer) => void;
+  onOfferPress: (offer: AppOffer) => void;
   onLoginPress: () => void;
   onProfilePress: () => void;
   onActiveOrderPress?: () => void;
@@ -141,6 +130,15 @@ export default function ExploreScreen({ onOfferPress, onLoginPress, onProfilePre
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [zoneSearch, setZoneSearch] = useState('');
   const [locating, setLocating] = useState(false);
+  const [apiOffers, setApiOffers] = useState<AppOffer[]>([]);
+  const [loadingOffers, setLoadingOffers] = useState(true);
+
+  useEffect(() => {
+    apiRequest<ApiOffer[]>('/offers')
+      .then(data => setApiOffers(data.map(mapApiOffer)))
+      .catch(() => {}) // mantiene lista vacía si falla, los mocks siguen como fallback
+      .finally(() => setLoadingOffers(false));
+  }, []);
 
   const handleGPS = async () => {
     setLocating(true);
@@ -164,7 +162,9 @@ export default function ExploreScreen({ onOfferPress, onLoginPress, onProfilePre
     }
   };
 
-  const filtered = MOCK_OFFERS.filter((o) => {
+  const sourceOffers = apiOffers.length > 0 ? apiOffers : MOCK_OFFERS;
+
+  const filtered = sourceOffers.filter((o) => {
     const matchesSearch =
       o.restaurantName.toLowerCase().includes(search.toLowerCase()) ||
       o.productName.toLowerCase().includes(search.toLowerCase());
@@ -175,7 +175,7 @@ export default function ExploreScreen({ onOfferPress, onLoginPress, onProfilePre
     return matchesSearch && matchesCategory;
   });
 
-  const discount = (offer: Offer) =>
+  const discount = (offer: AppOffer) =>
     Math.round(((offer.originalPrice - offer.offerPrice) / offer.originalPrice) * 100);
 
   const filteredZones = ZONES.filter(z => z.toLowerCase().includes(zoneSearch.toLowerCase()));
