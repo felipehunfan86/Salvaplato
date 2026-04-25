@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   SafeAreaView, StatusBar, ScrollView, Platform, KeyboardAvoidingView,
+  ActivityIndicator, Alert,
 } from 'react-native';
 import { colors, spacing, borderRadius, typography } from '../../theme';
 import ZoneAutocomplete from '../../components/ZoneAutocomplete';
+import { apiRequest, saveAuth } from '../../services/api';
 
 type Props = {
-  onRegister: (data: RestaurantData) => void;
+  onRegister: (businessName: string) => void;
   onLogin: () => void;
   onBack: () => void;
 };
@@ -41,6 +43,7 @@ export default function RestaurantRegisterScreen({ onRegister, onLogin, onBack }
   const [schedule, setSchedule] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -59,9 +62,42 @@ export default function RestaurantRegisterScreen({ onRegister, onLogin, onBack }
     return Object.keys(e).length === 0;
   };
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     if (!validate()) return;
-    onRegister({ businessName, rif, ownerName, email, password, phone, address, zone, category, schedule });
+    setLoading(true);
+    try {
+      // 1. Crear cuenta de usuario
+      const auth = await apiRequest<{ session: { access_token: string; refresh_token: string }; user: any }>('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ fullName: ownerName, email, password, phone }),
+      });
+      await saveAuth(auth.session.access_token, {
+        id: auth.user.id,
+        email: auth.user.email,
+        full_name: ownerName,
+        phone,
+      });
+
+      // 2. Registrar el restaurante
+      await apiRequest('/restaurants', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: businessName,
+          rif,
+          ownerName,
+          phone,
+          address,
+          cuisineType: category,
+          schedule,
+        }),
+      });
+
+      onRegister(businessName);
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'No se pudo completar el registro');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -130,8 +166,11 @@ export default function RestaurantRegisterScreen({ onRegister, onLogin, onBack }
             <Text style={styles.termsLink}>Política de privacidad</Text>.
           </Text>
 
-          <TouchableOpacity style={styles.btnPrimary} onPress={handleRegister}>
-            <Text style={styles.btnPrimaryText}>Enviar solicitud</Text>
+          <TouchableOpacity style={[styles.btnPrimary, loading && { opacity: 0.6 }]} onPress={handleRegister} disabled={loading}>
+            {loading
+              ? <ActivityIndicator color={colors.textLight} />
+              : <Text style={styles.btnPrimaryText}>Enviar solicitud</Text>
+            }
           </TouchableOpacity>
 
           <View style={styles.loginRow}>

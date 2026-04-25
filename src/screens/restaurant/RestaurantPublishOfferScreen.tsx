@@ -2,37 +2,40 @@ import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   SafeAreaView, StatusBar, Platform, ScrollView, KeyboardAvoidingView,
+  ActivityIndicator, Alert,
 } from 'react-native';
 import { colors, spacing, borderRadius, typography } from '../../theme';
+import { apiRequest } from '../../services/api';
 
 type Props = {
   onBack: () => void;
-  onPublish: (offer: OfferData) => void;
-  editOffer?: OfferData;
-};
-
-export type OfferData = {
-  name: string;
-  description: string;
-  originalPrice: string;
-  offerPrice: string;
-  units: string;
-  deadline: string;
-  category: string;
+  onPublish: () => void;
 };
 
 const CATEGORIES = ['🍕 Pizzas', '🍔 Burgers', '🥗 Ensaladas', '🍝 Pastas', '🍗 Pollos', '🥘 Guisos', '🧁 Postres', '☕ Bebidas', '🥪 Sándwiches', 'Otro'];
 const DEADLINES = ['6:00 PM', '6:30 PM', '7:00 PM', '7:30 PM', '8:00 PM', '8:30 PM', '9:00 PM', '9:30 PM', '10:00 PM'];
 
-export default function RestaurantPublishOfferScreen({ onBack, onPublish, editOffer }: Props) {
-  const [name, setName] = useState(editOffer?.name ?? '');
-  const [description, setDescription] = useState(editOffer?.description ?? '');
-  const [originalPrice, setOriginalPrice] = useState(editOffer?.originalPrice ?? '');
-  const [offerPrice, setOfferPrice] = useState(editOffer?.offerPrice ?? '');
-  const [units, setUnits] = useState(editOffer?.units ?? '');
-  const [deadline, setDeadline] = useState(editOffer?.deadline ?? '');
-  const [category, setCategory] = useState(editOffer?.category ?? '');
+function deadlineToISO(time: string): string {
+  const [timePart, period] = time.split(' ');
+  const [h, m] = timePart.split(':').map(Number);
+  let hours = h;
+  if (period === 'PM' && h !== 12) hours += 12;
+  if (period === 'AM' && h === 12) hours = 0;
+  const d = new Date();
+  d.setHours(hours, m, 0, 0);
+  return d.toISOString();
+}
+
+export default function RestaurantPublishOfferScreen({ onBack, onPublish }: Props) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [originalPrice, setOriginalPrice] = useState('');
+  const [offerPrice, setOfferPrice] = useState('');
+  const [units, setUnits] = useState('');
+  const [deadline, setDeadline] = useState('');
+  const [category, setCategory] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
 
   const discount = originalPrice && offerPrice
     ? Math.round((1 - parseFloat(offerPrice) / parseFloat(originalPrice)) * 100)
@@ -51,9 +54,33 @@ export default function RestaurantPublishOfferScreen({ onBack, onPublish, editOf
     return Object.keys(e).length === 0;
   };
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     if (!validate()) return;
-    onPublish({ name, description, originalPrice, offerPrice, units, deadline, category });
+    setLoading(true);
+    try {
+      const emojiMatch = category.match(/^\S+/);
+      const emoji = emojiMatch ? emojiMatch[0] : '🍽️';
+      const categoryName = category.replace(/^\S+\s*/, '') || category;
+
+      await apiRequest('/offers', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: name.trim(),
+          description: description.trim() || undefined,
+          originalPrice: parseFloat(originalPrice),
+          offerPrice: parseFloat(offerPrice),
+          quantityTotal: parseInt(units),
+          emoji,
+          category: categoryName,
+          pickupDeadline: deadlineToISO(deadline),
+        }),
+      });
+      onPublish();
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'No se pudo publicar la oferta');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -65,7 +92,7 @@ export default function RestaurantPublishOfferScreen({ onBack, onPublish, editOf
           <TouchableOpacity style={styles.backBtn} onPress={onBack}>
             <Text style={styles.backBtnText}>‹</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>{editOffer ? 'Editar oferta' : 'Nueva oferta'}</Text>
+          <Text style={styles.headerTitle}>Nueva oferta</Text>
           <View style={{ width: 40 }} />
         </View>
 
@@ -188,8 +215,11 @@ export default function RestaurantPublishOfferScreen({ onBack, onPublish, editOf
         </ScrollView>
 
         <View style={styles.bottomBar}>
-          <TouchableOpacity style={styles.publishBtn} onPress={handlePublish}>
-            <Text style={styles.publishBtnText}>{editOffer ? 'Guardar cambios' : 'Publicar oferta'}</Text>
+          <TouchableOpacity style={[styles.publishBtn, loading && styles.publishBtnDisabled]} onPress={handlePublish} disabled={loading}>
+            {loading
+              ? <ActivityIndicator color={colors.textLight} />
+              : <Text style={styles.publishBtnText}>Publicar oferta</Text>
+            }
           </TouchableOpacity>
         </View>
 
@@ -297,5 +327,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.secondary, borderRadius: borderRadius.full,
     paddingVertical: spacing.md, alignItems: 'center', elevation: 4,
   },
+  publishBtnDisabled: { opacity: 0.6 },
   publishBtnText: { ...typography.button, color: colors.textLight },
 });

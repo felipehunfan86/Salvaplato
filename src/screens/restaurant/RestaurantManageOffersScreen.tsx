@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   SafeAreaView, StatusBar, Platform, ScrollView,
+  ActivityIndicator, Alert,
 } from 'react-native';
 import { colors, spacing, borderRadius, typography } from '../../theme';
+import { apiRequest } from '../../services/api';
 
 type Props = {
   onBack: () => void;
@@ -25,36 +27,96 @@ type Offer = {
   status: OfferStatus;
 };
 
-const MOCK_OFFERS: Offer[] = [
-  { id: '1', name: 'Pizza Margarita (2 und)', category: '🍕 Pizzas', originalPrice: 9.0, offerPrice: 4.5, unitsTotal: 5, unitsSold: 2, deadline: '8:00 PM', status: 'active' },
-  { id: '2', name: 'Combo Pasta + Refresco', category: '🍝 Pastas', originalPrice: 10.0, offerPrice: 6.0, unitsTotal: 3, unitsSold: 2, deadline: '7:30 PM', status: 'active' },
-  { id: '3', name: 'Brownie de Chocolate', category: '🧁 Postres', originalPrice: 4.0, offerPrice: 2.0, unitsTotal: 8, unitsSold: 1, deadline: '9:00 PM', status: 'paused' },
-  { id: '4', name: 'Pollo Asado con Yuca', category: '🍗 Pollos', originalPrice: 12.0, offerPrice: 7.0, unitsTotal: 4, unitsSold: 4, deadline: '6:00 PM', status: 'sold_out' },
-  { id: '5', name: 'Sandwich Mixto', category: '🥪 Sándwiches', originalPrice: 5.0, offerPrice: 2.5, unitsTotal: 6, unitsSold: 3, deadline: '5:30 PM', status: 'expired' },
-];
+function mapApiOffer(api: any): Offer {
+  const deadline = new Date(api.pickup_deadline);
+  const h = deadline.getHours();
+  const m = deadline.getMinutes().toString().padStart(2, '0');
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+
+  const unitsSold = (api.quantity_total ?? 0) - (api.quantity_available ?? 0);
+  const now = new Date();
+
+  let status: OfferStatus = 'active';
+  if (api.status === 'closed') status = 'paused';
+  else if (api.quantity_available === 0) status = 'sold_out';
+  else if (deadline < now) status = 'expired';
+
+  return {
+    id: api.id,
+    name: api.title,
+    category: `${api.emoji ?? '🍽️'} ${api.category ?? ''}`,
+    originalPrice: api.original_price,
+    offerPrice: api.offer_price,
+    unitsTotal: api.quantity_total ?? 1,
+    unitsSold,
+    deadline: `${h12}:${m} ${period}`,
+    status,
+  };
+}
 
 const FILTERS: { label: string; value: OfferStatus | 'all' }[] = [
-  { label: 'Todas', value: 'all' },
-  { label: 'Activas', value: 'active' },
+  { label: 'Todas',    value: 'all' },
+  { label: 'Activas',  value: 'active' },
   { label: 'Pausadas', value: 'paused' },
   { label: 'Agotadas', value: 'sold_out' },
-  { label: 'Expiradas', value: 'expired' },
+  { label: 'Expiradas',value: 'expired' },
 ];
 
 export default function RestaurantManageOffersScreen({ onBack, onPublishOffer, onEditOffer }: Props) {
   const [filter, setFilter] = useState<OfferStatus | 'all'>('all');
-  const [offers, setOffers] = useState<Offer[]>(MOCK_OFFERS);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadOffers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await apiRequest<any[]>('/offers/my');
+      setOffers(data.map(mapApiOffer));
+    } catch {
+      // Si falla la API, lista vacía
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadOffers(); }, [loadOffers]);
 
   const filtered = filter === 'all' ? offers : offers.filter(o => o.status === filter);
 
-  const togglePause = (id: string) => {
-    setOffers(prev => prev.map(o =>
-      o.id === id ? { ...o, status: o.status === 'active' ? 'paused' : 'active' } : o
-    ));
+  const togglePause = async (id: string, currentStatus: OfferStatus) => {
+    const newApiStatus = currentStatus === 'active' ? 'closed' : 'active';
+    try {
+      await apiRequest(`/offers/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newApiStatus }),
+      });
+      setOffers(prev => prev.map(o =>
+        o.id === id
+          ? { ...o, status: newApiStatus === 'closed' ? 'paused' : 'active' }
+          : o
+      ));
+    } catch {
+      Alert.alert('Error', 'No se pudo actualizar la oferta');
+    }
   };
 
-  const deleteOffer = (id: string) => {
-    setOffers(prev => prev.filter(o => o.id !== id));
+  const deleteOffer = async (id: string) => {
+    Alert.alert('Cerrar oferta', '¿Seguro que quieres cerrar esta oferta?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Cerrar',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await apiRequest(`/offers/${id}`, { method: 'DELETE' });
+            setOffers(prev => prev.filter(o => o.id !== id));
+          } catch {
+            Alert.alert('Error', 'No se pudo cerrar la oferta');
+          }
+        },
+      },
+    ]);
   };
 
   return (
@@ -71,10 +133,17 @@ export default function RestaurantManageOffersScreen({ onBack, onPublishOffer, o
         </TouchableOpacity>
       </View>
 
-      {/* Filter tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={styles.filterContent}>
+      {/* Filter tabs — horizontal scroll con padding al final */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterScroll}
+        contentContainerStyle={styles.filterContent}
+      >
         {FILTERS.map((f) => {
-          const count = f.value === 'all' ? offers.length : offers.filter(o => o.status === f.value).length;
+          const count = f.value === 'all'
+            ? offers.length
+            : offers.filter(o => o.status === f.value).length;
           return (
             <TouchableOpacity
               key={f.value}
@@ -89,28 +158,39 @@ export default function RestaurantManageOffersScreen({ onBack, onPublishOffer, o
         })}
       </ScrollView>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {filtered.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyEmoji}>📭</Text>
-            <Text style={styles.emptyText}>No hay ofertas en esta categoría</Text>
-            <TouchableOpacity style={styles.emptyBtn} onPress={onPublishOffer}>
-              <Text style={styles.emptyBtnText}>Publicar primera oferta</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          filtered.map((offer) => (
-            <OfferCard
-              key={offer.id}
-              offer={offer}
-              onEdit={() => onEditOffer(offer.id)}
-              onTogglePause={() => togglePause(offer.id)}
-              onDelete={() => deleteOffer(offer.id)}
-            />
-          ))
-        )}
-        <View style={{ height: spacing.xl }} />
-      </ScrollView>
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Cargando ofertas...</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          {filtered.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyEmoji}>📭</Text>
+              <Text style={styles.emptyText}>
+                {offers.length === 0
+                  ? 'Aún no has publicado ninguna oferta'
+                  : 'No hay ofertas en esta categoría'}
+              </Text>
+              <TouchableOpacity style={styles.emptyBtn} onPress={onPublishOffer}>
+                <Text style={styles.emptyBtnText}>Publicar primera oferta</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            filtered.map((offer) => (
+              <OfferCard
+                key={offer.id}
+                offer={offer}
+                onEdit={() => onEditOffer(offer.id)}
+                onTogglePause={() => togglePause(offer.id, offer.status)}
+                onDelete={() => deleteOffer(offer.id)}
+              />
+            ))
+          )}
+          <View style={{ height: spacing.xl }} />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -124,15 +204,16 @@ function OfferCard({ offer, onEdit, onTogglePause, onDelete }: {
   const [showActions, setShowActions] = useState(false);
   const discount = Math.round((1 - offer.offerPrice / offer.originalPrice) * 100);
   const unitsLeft = offer.unitsTotal - offer.unitsSold;
-  const progress = offer.unitsSold / offer.unitsTotal;
+  const progress = offer.unitsTotal > 0 ? offer.unitsSold / offer.unitsTotal : 0;
 
   const statusConfig: Record<OfferStatus, { label: string; bg: string; text: string }> = {
-    active: { label: 'Activa', bg: '#E8F5E9', text: colors.primary },
-    paused: { label: 'Pausada', bg: '#FFF8E1', text: '#F57F17' },
-    sold_out: { label: 'Agotada', bg: '#FCE4EC', text: '#C62828' },
-    expired: { label: 'Expirada', bg: '#F5F5F5', text: colors.textSecondary },
+    active:   { label: 'Activa',    bg: '#E8F5E9', text: colors.primary },
+    paused:   { label: 'Pausada',   bg: '#FFF8E1', text: '#F57F17' },
+    sold_out: { label: 'Agotada',   bg: '#FCE4EC', text: '#C62828' },
+    expired:  { label: 'Expirada',  bg: '#F5F5F5', text: colors.textSecondary },
   };
   const sc = statusConfig[offer.status];
+  const canEdit = offer.status === 'active' || offer.status === 'paused';
 
   return (
     <View style={styles.card}>
@@ -152,12 +233,13 @@ function OfferCard({ offer, onEdit, onTogglePause, onDelete }: {
           </View>
         </View>
 
-        {/* Progress bar */}
         <View style={styles.progressSection}>
           <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: `${progress * 100}%` as any }]} />
+            <View style={[styles.progressFill, { width: `${Math.min(progress * 100, 100)}%` as any }]} />
           </View>
-          <Text style={styles.progressText}>{offer.unitsSold}/{offer.unitsTotal} vendidas · {unitsLeft} restantes</Text>
+          <Text style={styles.progressText}>
+            {offer.unitsSold}/{offer.unitsTotal} vendidas · {unitsLeft} restantes
+          </Text>
         </View>
 
         <View style={styles.cardBottom}>
@@ -168,7 +250,7 @@ function OfferCard({ offer, onEdit, onTogglePause, onDelete }: {
         </View>
       </TouchableOpacity>
 
-      {showActions && offer.status !== 'sold_out' && offer.status !== 'expired' && (
+      {showActions && canEdit && (
         <View style={styles.actions}>
           <TouchableOpacity style={styles.actionBtn} onPress={onEdit}>
             <Text style={styles.actionBtnEmoji}>✏️</Text>
@@ -182,7 +264,7 @@ function OfferCard({ offer, onEdit, onTogglePause, onDelete }: {
           </TouchableOpacity>
           <TouchableOpacity style={[styles.actionBtn, styles.actionBtnDanger]} onPress={onDelete}>
             <Text style={styles.actionBtnEmoji}>🗑️</Text>
-            <Text style={[styles.actionBtnText, styles.actionBtnTextDanger]}>Eliminar</Text>
+            <Text style={[styles.actionBtnText, styles.actionBtnTextDanger]}>Cerrar</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -205,8 +287,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
   },
   addBtnText: { ...typography.caption, fontWeight: '700', color: colors.textLight },
-  filterScroll: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
-  filterContent: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, gap: spacing.sm },
+  filterScroll: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, maxHeight: 52 },
+  filterContent: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+    paddingRight: spacing.xl * 2, // espacio extra para ver el último tab completo
+  },
   filterTab: {
     paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
     borderRadius: borderRadius.full, borderWidth: 1, borderColor: colors.border,
@@ -214,10 +301,12 @@ const styles = StyleSheet.create({
   filterTabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   filterTabText: { ...typography.caption, fontWeight: '600', color: '#212121' },
   filterTabTextActive: { color: colors.textLight },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
+  loadingText: { ...typography.body, color: colors.textSecondary },
   scroll: { padding: spacing.lg },
-  emptyState: { alignItems: 'center', paddingVertical: spacing.xxl },
+  emptyState: { alignItems: 'center', paddingVertical: spacing.xxl ?? 48 },
   emptyEmoji: { fontSize: 48, marginBottom: spacing.md },
-  emptyText: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.lg },
+  emptyText: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.lg, textAlign: 'center' },
   emptyBtn: { backgroundColor: colors.secondary, borderRadius: borderRadius.full, paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
   emptyBtnText: { ...typography.button, color: colors.textLight },
   card: {
@@ -244,9 +333,7 @@ const styles = StyleSheet.create({
   statusBadge: { paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: borderRadius.full },
   statusText: { fontSize: 11, fontWeight: '600' },
   expandHint: { ...typography.caption, color: colors.textSecondary },
-  actions: {
-    flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border,
-  },
+  actions: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border },
   actionBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: spacing.xs, paddingVertical: spacing.md,

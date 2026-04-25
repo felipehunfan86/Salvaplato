@@ -24,6 +24,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import {
   apiRequest, clearAuth, getSavedUser, StoredUser, AppOffer,
+  saveAuth,
 } from './src/services/api';
 
 type Screen =
@@ -67,6 +68,7 @@ export default function App() {
   const [selectedOffer, setSelectedOffer] = useState<AppOffer | null>(null);
   const [currentUser, setCurrentUser] = useState<StoredUser | null>(null);
   const [restaurantName, setRestaurantName] = useState('');
+  const [loginIntent, setLoginIntent] = useState<'consumer' | 'restaurant'>('consumer');
   const [orders, setOrders] = useState<Order[]>([]);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [activeQrToken, setActiveQrToken] = useState<string | null>(null);
@@ -91,10 +93,21 @@ export default function App() {
   const activeOrders = orders.filter(o => o.status === 'pendiente');
   const currentQROrder = orders.find(o => o.orderId === activeOrderId) ?? null;
 
-  const handleAuthSuccess = (user: StoredUser) => {
+  const handleAuthSuccess = async (user: StoredUser) => {
     setCurrentUser(user);
     registerPushToken();
-    setScreen(selectedOffer ? 'offerDetail' : 'explore');
+    if (loginIntent === 'restaurant') {
+      setLoginIntent('consumer');
+      try {
+        const restaurant = await apiRequest<{ id: string; name: string }>('/restaurants/mine');
+        setRestaurantName(restaurant.name);
+        setScreen('restaurantDashboard');
+      } catch {
+        setScreen('explore');
+      }
+    } else {
+      setScreen(selectedOffer ? 'offerDetail' : 'explore');
+    }
   };
 
   const handleLogout = async () => {
@@ -320,8 +333,8 @@ export default function App() {
   if (screen === 'restaurantRegister') {
     return (
       <RestaurantRegisterScreen
-        onRegister={(data) => { setRestaurantName(data.businessName); setScreen('restaurantDashboard'); }}
-        onLogin={() => setScreen('restaurantDashboard')}
+        onRegister={(businessName) => { setRestaurantName(businessName); setScreen('restaurantDashboard'); }}
+        onLogin={() => { setLoginIntent('restaurant'); setScreen('login'); }}
         onBack={() => setScreen('welcome')}
       />
     );
@@ -348,6 +361,7 @@ export default function App() {
       />
     );
   }
+
 
   if (screen === 'restaurantManageOffers') {
     return (

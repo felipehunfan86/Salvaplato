@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   SafeAreaView, StatusBar, Platform, ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { colors, spacing, borderRadius, typography } from '../../theme';
+import { apiRequest } from '../../services/api';
 
 type Props = {
   businessName: string;
@@ -14,34 +16,78 @@ type Props = {
   onProfile: () => void;
 };
 
-const MOCK_OFFERS = [
-  { id: '1', name: 'Pizza Margarita (2 und)', price: 4.5, units: 3, deadline: '8:00 PM', status: 'active' },
-  { id: '2', name: 'Combo Pasta + Refresco', price: 6.0, units: 1, deadline: '7:30 PM', status: 'active' },
-  { id: '3', name: 'Brownie de Chocolate', price: 2.0, units: 5, deadline: '9:00 PM', status: 'paused' },
-];
-
-const MOCK_ORDERS = [
-  { id: 'ORD-001', customer: 'María G.', product: 'Pizza Margarita (2 und)', amount: 4.5, status: 'pending' },
-  { id: 'ORD-002', customer: 'Carlos R.', product: 'Combo Pasta + Refresco', amount: 6.0, status: 'confirmed' },
-  { id: 'ORD-003', customer: 'Ana P.', product: 'Brownie de Chocolate', amount: 2.0, status: 'confirmed' },
-];
+type DashOffer = { id: string; name: string; price: number; units: number; deadline: string; status: 'active' | 'paused' };
+type DashOrder = { id: string; customer: string; product: string; amount: number; status: string };
 
 export default function RestaurantDashboardScreen({ businessName, onPublishOffer, onManageOffers, onOrders, onScanQR, onProfile }: Props) {
-  const pendingCount = MOCK_ORDERS.filter(o => o.status === 'pending').length;
+  const [name, setName] = useState(businessName);
+  const [offers, setOffers] = useState<DashOffer[]>([]);
+  const [orders, setOrders] = useState<DashOrder[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const [restaurant, allOffers, allOrders] = await Promise.all([
+        apiRequest<any>('/restaurants/mine'),
+        apiRequest<any[]>('/offers/my'),
+        apiRequest<any[]>('/orders/restaurant'),
+      ]);
+
+      setName(restaurant.name);
+
+      const dashOffers: DashOffer[] = allOffers
+        .filter(o => o.status === 'active' || o.status === 'closed')
+        .slice(0, 3)
+        .map(o => {
+          const d = new Date(o.pickup_deadline);
+          const h = d.getHours();
+          const m = d.getMinutes().toString().padStart(2, '0');
+          const period = h >= 12 ? 'PM' : 'AM';
+          const h12 = h % 12 || 12;
+          return {
+            id: o.id,
+            name: o.title,
+            price: o.offer_price,
+            units: o.quantity_available ?? 0,
+            deadline: `${h12}:${m} ${period}`,
+            status: o.status === 'active' ? 'active' : 'paused',
+          };
+        });
+      setOffers(dashOffers);
+
+      const dashOrders: DashOrder[] = allOrders.slice(0, 3).map(o => ({
+        id: o.id,
+        customer: o.profiles?.full_name ?? 'Cliente',
+        product: o.offers?.title ?? 'Producto',
+        amount: o.total_amount ?? 0,
+        status: o.status,
+      }));
+      setOrders(dashOrders);
+      setPendingCount(allOrders.filter(o => o.status === 'pending').length);
+    } catch {
+      // mantener estado inicial si falla
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const todayRevenue = orders.reduce((s, o) => s + o.amount, 0);
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.secondary} />
 
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{businessName.charAt(0).toUpperCase()}</Text>
+            <Text style={styles.avatarText}>{name.charAt(0).toUpperCase()}</Text>
           </View>
           <View>
             <Text style={styles.headerGreeting}>Bienvenido</Text>
-            <Text style={styles.headerName}>{businessName}</Text>
+            <Text style={styles.headerName}>{name}</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.profileBtn} onPress={onProfile}>
@@ -49,82 +95,100 @@ export default function RestaurantDashboardScreen({ businessName, onPublishOffer
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-
-        {/* Stats */}
-        <View style={styles.statsRow}>
-          <StatCard emoji="💰" label="Ingresos hoy" value="$12.50" />
-          <StatCard emoji="🛍️" label="Ventas hoy" value="3" />
-          <StatCard emoji="🌱" label="Kg rescatados" value="2.4" />
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Quick actions */}
-        <Text style={styles.sectionTitle}>Acciones rápidas</Text>
-        <View style={styles.actionsGrid}>
-          <ActionCard emoji="➕" label="Nueva oferta" color={colors.secondary} onPress={onPublishOffer} />
-          <ActionCard emoji="📋" label="Mis ofertas" color={colors.primary} onPress={onManageOffers} />
-          <ActionCard
-            emoji="🔔"
-            label="Pedidos"
-            color="#5C6BC0"
-            onPress={onOrders}
-            badge={pendingCount > 0 ? pendingCount : undefined}
-          />
-          <ActionCard emoji="📷" label="Escanear QR" color="#FF7043" onPress={onScanQR} />
-        </View>
-
-        {/* Active offers */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Ofertas activas</Text>
-          <TouchableOpacity onPress={onManageOffers}>
-            <Text style={styles.seeAll}>Ver todas</Text>
-          </TouchableOpacity>
-        </View>
-
-        {MOCK_OFFERS.map((offer) => (
-          <View key={offer.id} style={styles.offerCard}>
-            <View style={styles.offerInfo}>
-              <Text style={styles.offerName}>{offer.name}</Text>
-              <Text style={styles.offerMeta}>{offer.units} und · hasta {offer.deadline}</Text>
-            </View>
-            <View style={styles.offerRight}>
-              <Text style={styles.offerPrice}>${offer.price.toFixed(2)}</Text>
-              <View style={[styles.statusBadge, offer.status === 'paused' ? styles.badgePaused : styles.badgeActive]}>
-                <Text style={[styles.statusText, offer.status === 'paused' ? styles.statusTextPaused : styles.statusTextActive]}>
-                  {offer.status === 'active' ? 'Activa' : 'Pausada'}
-                </Text>
-              </View>
-            </View>
+          <View style={styles.statsRow}>
+            <StatCard emoji="💰" label="Ingresos" value={`$${todayRevenue.toFixed(2)}`} />
+            <StatCard emoji="🛍️" label="Pedidos" value={String(orders.length)} />
+            <StatCard emoji="🌱" label="Ofertas activas" value={String(offers.filter(o => o.status === 'active').length)} />
           </View>
-        ))}
 
-        {/* Recent orders */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Pedidos recientes</Text>
-          <TouchableOpacity onPress={onOrders}>
-            <Text style={styles.seeAll}>Ver todos</Text>
-          </TouchableOpacity>
-        </View>
-
-        {MOCK_ORDERS.map((order) => (
-          <View key={order.id} style={styles.orderCard}>
-            <View style={styles.orderLeft}>
-              <Text style={styles.orderCustomer}>{order.customer}</Text>
-              <Text style={styles.orderProduct}>{order.product}</Text>
-            </View>
-            <View style={styles.orderRight}>
-              <Text style={styles.orderAmount}>${order.amount.toFixed(2)}</Text>
-              <View style={[styles.statusBadge, order.status === 'pending' ? styles.badgePending : styles.badgeConfirmed]}>
-                <Text style={[styles.statusText, order.status === 'pending' ? styles.statusTextPending : styles.statusTextConfirmed]}>
-                  {order.status === 'pending' ? 'Pendiente' : 'Confirmado'}
-                </Text>
-              </View>
-            </View>
+          <Text style={styles.sectionTitle}>Acciones rápidas</Text>
+          <View style={styles.actionsGrid}>
+            <ActionCard emoji="➕" label="Nueva oferta" color={colors.secondary} onPress={onPublishOffer} />
+            <ActionCard emoji="📋" label="Mis ofertas" color={colors.primary} onPress={onManageOffers} />
+            <ActionCard
+              emoji="🔔"
+              label="Pedidos"
+              color="#5C6BC0"
+              onPress={onOrders}
+              badge={pendingCount > 0 ? pendingCount : undefined}
+            />
+            <ActionCard emoji="📷" label="Escanear QR" color="#FF7043" onPress={onScanQR} />
           </View>
-        ))}
 
-        <View style={{ height: spacing.xl }} />
-      </ScrollView>
+          {offers.length > 0 && (
+            <>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Ofertas activas</Text>
+                <TouchableOpacity onPress={onManageOffers}>
+                  <Text style={styles.seeAll}>Ver todas</Text>
+                </TouchableOpacity>
+              </View>
+              {offers.map((offer) => (
+                <View key={offer.id} style={styles.offerCard}>
+                  <View style={styles.offerInfo}>
+                    <Text style={styles.offerName}>{offer.name}</Text>
+                    <Text style={styles.offerMeta}>{offer.units} und · hasta {offer.deadline}</Text>
+                  </View>
+                  <View style={styles.offerRight}>
+                    <Text style={styles.offerPrice}>${offer.price.toFixed(2)}</Text>
+                    <View style={[styles.statusBadge, offer.status === 'paused' ? styles.badgePaused : styles.badgeActive]}>
+                      <Text style={[styles.statusText, offer.status === 'paused' ? styles.statusTextPaused : styles.statusTextActive]}>
+                        {offer.status === 'active' ? 'Activa' : 'Pausada'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
+
+          {orders.length > 0 && (
+            <>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Pedidos recientes</Text>
+                <TouchableOpacity onPress={onOrders}>
+                  <Text style={styles.seeAll}>Ver todos</Text>
+                </TouchableOpacity>
+              </View>
+              {orders.map((order) => (
+                <View key={order.id} style={styles.orderCard}>
+                  <View style={styles.orderLeft}>
+                    <Text style={styles.orderCustomer}>{order.customer}</Text>
+                    <Text style={styles.orderProduct}>{order.product}</Text>
+                  </View>
+                  <View style={styles.orderRight}>
+                    <Text style={styles.orderAmount}>${order.amount.toFixed(2)}</Text>
+                    <View style={[styles.statusBadge, order.status === 'pending' ? styles.badgePending : styles.badgeConfirmed]}>
+                      <Text style={[styles.statusText, order.status === 'pending' ? styles.statusTextPending : styles.statusTextConfirmed]}>
+                        {order.status === 'pending' ? 'Pendiente' : 'Completado'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
+
+          {offers.length === 0 && orders.length === 0 && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyEmoji}>🚀</Text>
+              <Text style={styles.emptyText}>Publica tu primera oferta para empezar a vender</Text>
+              <TouchableOpacity style={styles.emptyBtn} onPress={onPublishOffer}>
+                <Text style={styles.emptyBtnText}>Publicar oferta</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={{ height: spacing.xl }} />
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -174,6 +238,7 @@ const styles = StyleSheet.create({
   headerName: { ...typography.h3, color: colors.textLight },
   profileBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   profileBtnText: { fontSize: 22 },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { padding: spacing.lg },
   statsRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
   statCard: {
@@ -227,4 +292,9 @@ const styles = StyleSheet.create({
   statusTextPending: { color: '#E65100' },
   badgeConfirmed: { backgroundColor: '#E8F5E9' },
   statusTextConfirmed: { color: colors.primary },
+  emptyState: { alignItems: 'center', paddingVertical: 48 },
+  emptyEmoji: { fontSize: 48, marginBottom: spacing.md },
+  emptyText: { ...typography.body, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.lg },
+  emptyBtn: { backgroundColor: colors.secondary, borderRadius: borderRadius.full, paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
+  emptyBtnText: { ...typography.button, color: colors.textLight },
 });
