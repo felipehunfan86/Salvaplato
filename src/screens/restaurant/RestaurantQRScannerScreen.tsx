@@ -1,86 +1,120 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  SafeAreaView, StatusBar, Platform,
+  SafeAreaView, StatusBar, Platform, ActivityIndicator,
 } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { colors, spacing, borderRadius, typography } from '../../theme';
 
 type Props = {
   onBack: () => void;
 };
 
-type ScanState = 'scanning' | 'success' | 'error';
+type ScanState = 'scanning' | 'loading' | 'success' | 'error';
 
-const MOCK_CONFIRMED_ORDER = {
-  id: 'ORD-001',
-  customer: 'María García',
-  product: 'Pizza Margarita (2 und)',
-  amount: 4.5,
+type ConfirmedOrder = {
+  order_code: string;
+  quantity: number;
+  restaurant_payout: number;
 };
 
 export default function RestaurantQRScannerScreen({ onBack }: Props) {
+  const [permission, requestPermission] = useCameraPermissions();
   const [scanState, setScanState] = useState<ScanState>('scanning');
-  const [countdown, setCountdown] = useState(3);
+  const [confirmedOrder, setConfirmedOrder] = useState<ConfirmedOrder | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [scanned, setScanned] = useState(false);
 
-  const simulateScan = () => {
-    setScanState('scanning');
-    setCountdown(3);
-    const interval = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          setScanState('success');
-          return 0;
-        }
-        return prev - 1;
+  const handleBarCodeScanned = useCallback(async ({ data }: { data: string }) => {
+    if (scanned) return;
+    setScanned(true);
+    setScanState('loading');
+
+    try {
+      // TODO: reemplazar con token real del restaurante autenticado
+      const token = 'RESTAURANT_JWT_TOKEN';
+
+      const res = await fetch(`http://localhost:3000/api/orders/scan/${data}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
       });
-    }, 1000);
-  };
 
-  const handleError = () => {
-    setScanState('error');
-  };
+      const json = await res.json();
+
+      if (!res.ok) {
+        setErrorMsg(json.message ?? 'QR inválido o ya escaneado');
+        setScanState('error');
+      } else {
+        setConfirmedOrder(json);
+        setScanState('success');
+      }
+    } catch {
+      setErrorMsg('Error de conexión. Verifica tu internet.');
+      setScanState('error');
+    }
+  }, [scanned]);
 
   const reset = () => {
     setScanState('scanning');
-    setCountdown(3);
+    setScanned(false);
+    setConfirmedOrder(null);
+    setErrorMsg('');
   };
 
-  if (scanState === 'success') {
+  // Sin permiso aún — pedir
+  if (!permission) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ActivityIndicator size="large" color={colors.primary} style={{ flex: 1 }} />
+      </SafeAreaView>
+    );
+  }
+
+  if (!permission.granted) {
+    return (
+      <SafeAreaView style={[styles.container, styles.centeredContent]}>
+        <StatusBar barStyle="dark-content" />
+        <Text style={styles.permissionEmoji}>📷</Text>
+        <Text style={styles.permissionTitle}>Permiso de cámara requerido</Text>
+        <Text style={styles.permissionBody}>
+          SalvaPlato necesita acceso a la cámara para escanear los QR de tus clientes.
+        </Text>
+        <TouchableOpacity style={styles.permissionBtn} onPress={requestPermission}>
+          <Text style={styles.permissionBtnText}>Dar permiso</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.backLink} onPress={onBack}>
+          <Text style={styles.backLinkText}>Volver</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  if (scanState === 'success' && confirmedOrder) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#1B5E20" />
-        <View style={styles.successContainer}>
+        <View style={styles.resultContainer}>
           <View style={styles.successIcon}>
-            <Text style={styles.successEmoji}>✅</Text>
+            <Text style={styles.resultEmoji}>✅</Text>
           </View>
-          <Text style={styles.successTitle}>¡Retiro confirmado!</Text>
-          <Text style={styles.successSubtitle}>El pago ha sido liberado a tu cuenta</Text>
+          <Text style={styles.resultTitle}>¡Retiro confirmado!</Text>
+          <Text style={styles.resultSubtitle}>El pago ha sido liberado a tu cuenta</Text>
 
-          <View style={styles.successCard}>
-            <View style={styles.successRow}>
-              <Text style={styles.successLabel}>Pedido</Text>
-              <Text style={styles.successValue}>{MOCK_CONFIRMED_ORDER.id}</Text>
-            </View>
-            <View style={styles.successRow}>
-              <Text style={styles.successLabel}>Cliente</Text>
-              <Text style={styles.successValue}>{MOCK_CONFIRMED_ORDER.customer}</Text>
-            </View>
-            <View style={styles.successRow}>
-              <Text style={styles.successLabel}>Producto</Text>
-              <Text style={styles.successValue}>{MOCK_CONFIRMED_ORDER.product}</Text>
-            </View>
-            <View style={[styles.successRow, styles.successRowLast]}>
-              <Text style={styles.successLabel}>Monto recibido</Text>
-              <Text style={[styles.successValue, styles.successAmount]}>${MOCK_CONFIRMED_ORDER.amount.toFixed(2)}</Text>
-            </View>
+          <View style={styles.resultCard}>
+            <ResultRow label="Código" value={confirmedOrder.order_code} />
+            <ResultRow label="Unidades" value={String(confirmedOrder.quantity)} />
+            <ResultRow
+              label="Monto recibido"
+              value={`$${confirmedOrder.restaurant_payout.toFixed(2)}`}
+              highlight
+            />
           </View>
 
-          <TouchableOpacity style={styles.scanAgainBtn} onPress={reset}>
-            <Text style={styles.scanAgainBtnText}>Escanear otro QR</Text>
+          <TouchableOpacity style={styles.primaryBtn} onPress={reset}>
+            <Text style={styles.primaryBtnText}>Escanear otro QR</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.backBtn2} onPress={onBack}>
-            <Text style={styles.backBtn2Text}>Volver a pedidos</Text>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={onBack}>
+            <Text style={styles.secondaryBtnText}>Volver a pedidos</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -91,20 +125,18 @@ export default function RestaurantQRScannerScreen({ onBack }: Props) {
     return (
       <SafeAreaView style={[styles.container, styles.errorBg]}>
         <StatusBar barStyle="light-content" backgroundColor="#B71C1C" />
-        <View style={styles.successContainer}>
+        <View style={styles.resultContainer}>
           <View style={[styles.successIcon, styles.errorIcon]}>
-            <Text style={styles.successEmoji}>❌</Text>
+            <Text style={styles.resultEmoji}>❌</Text>
           </View>
-          <Text style={[styles.successTitle, styles.errorTitle]}>QR no válido</Text>
-          <Text style={[styles.successSubtitle, styles.errorSubtitle]}>
-            Este código no corresponde a ningún pedido activo o ya fue escaneado.
-          </Text>
+          <Text style={[styles.resultTitle, styles.lightText]}>QR no válido</Text>
+          <Text style={[styles.resultSubtitle, styles.lightText]}>{errorMsg}</Text>
 
-          <TouchableOpacity style={styles.scanAgainBtn} onPress={reset}>
-            <Text style={styles.scanAgainBtnText}>Intentar de nuevo</Text>
+          <TouchableOpacity style={styles.primaryBtn} onPress={reset}>
+            <Text style={styles.primaryBtnText}>Intentar de nuevo</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.backBtn2} onPress={onBack}>
-            <Text style={styles.backBtn2Text}>Volver</Text>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={onBack}>
+            <Text style={[styles.secondaryBtnText, styles.lightText]}>Volver</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -123,60 +155,88 @@ export default function RestaurantQRScannerScreen({ onBack }: Props) {
         <View style={{ width: 40 }} />
       </View>
 
-      {/* Camera simulation */}
-      <View style={styles.cameraArea}>
-        <View style={styles.cameraFrame}>
-          {/* Corner markers */}
-          <View style={[styles.corner, styles.cornerTL]} />
-          <View style={[styles.corner, styles.cornerTR]} />
-          <View style={[styles.corner, styles.cornerBL]} />
-          <View style={[styles.corner, styles.cornerBR]} />
+      <View style={styles.cameraContainer}>
+        {scanState === 'loading' ? (
+          <View style={styles.loadingOverlay}>
+            <ActivityIndicator size="large" color={colors.secondary} />
+            <Text style={styles.loadingText}>Verificando pedido...</Text>
+          </View>
+        ) : (
+          <CameraView
+            style={StyleSheet.absoluteFillObject}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={handleBarCodeScanned}
+          />
+        )}
 
-          {/* Center */}
-          <View style={styles.cameraCenter}>
-            <Text style={styles.cameraIcon}>📷</Text>
-            <Text style={styles.cameraHint}>Apunta la cámara al código QR del cliente</Text>
+        {/* Visor */}
+        <View style={styles.viewfinderOuter}>
+          <View style={styles.viewfinder}>
+            <View style={[styles.corner, styles.cornerTL]} />
+            <View style={[styles.corner, styles.cornerTR]} />
+            <View style={[styles.corner, styles.cornerBL]} />
+            <View style={[styles.corner, styles.cornerBR]} />
           </View>
         </View>
-
-        <Text style={styles.scanHint}>El QR se encuentra en la app del cliente</Text>
       </View>
 
-      {/* Actions */}
-      <View style={styles.scanActions}>
-        <Text style={styles.simLabel}>— Simulación —</Text>
-        <TouchableOpacity style={styles.simulateBtn} onPress={simulateScan}>
-          <Text style={styles.simulateBtnText}>
-            {countdown < 3 ? `Escaneando... ${countdown}` : '📷  Simular escaneo exitoso'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.errorBtn} onPress={handleError}>
-          <Text style={styles.errorBtnText}>Simular QR inválido</Text>
-        </TouchableOpacity>
-        <Text style={styles.note}>
-          La cámara real se integrará cuando conectemos la app al backend con expo-camera.
-        </Text>
+      <View style={styles.hintBar}>
+        <Text style={styles.hintText}>Apunta al código QR de la app del cliente</Text>
       </View>
     </SafeAreaView>
   );
 }
 
+function ResultRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <View style={resultRowStyles.row}>
+      <Text style={resultRowStyles.label}>{label}</Text>
+      <Text style={[resultRowStyles.value, highlight && resultRowStyles.highlight]}>{value}</Text>
+    </View>
+  );
+}
+
+const resultRowStyles = StyleSheet.create({
+  row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  label: { ...typography.caption, color: colors.textSecondary },
+  value: { ...typography.body, fontWeight: '600', color: colors.textPrimary },
+  highlight: { color: colors.primary, fontSize: 18, fontWeight: '700' },
+});
+
 const CORNER_SIZE = 28;
 const CORNER_THICKNESS = 4;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
   darkBg: { backgroundColor: '#111' },
   errorBg: { backgroundColor: '#B71C1C' },
+  centeredContent: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl },
   scanHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
   },
-  closeBtn: { width: 40, height: 40, borderRadius: borderRadius.full, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
+  closeBtn: {
+    width: 40, height: 40, borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center',
+  },
   closeBtnText: { fontSize: 16, color: '#fff' },
   scanTitle: { ...typography.h3, color: '#fff' },
-  cameraArea: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl },
-  cameraFrame: {
+  cameraContainer: { flex: 1, position: 'relative', backgroundColor: '#000' },
+  loadingOverlay: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000', gap: spacing.md,
+  },
+  loadingText: { ...typography.body, color: '#fff' },
+  viewfinderOuter: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewfinder: {
     width: 260, height: 260, position: 'relative',
     alignItems: 'center', justifyContent: 'center',
   },
@@ -188,53 +248,48 @@ const styles = StyleSheet.create({
   cornerTR: { top: 0, right: 0, borderTopWidth: CORNER_THICKNESS, borderRightWidth: CORNER_THICKNESS, borderTopRightRadius: 4 },
   cornerBL: { bottom: 0, left: 0, borderBottomWidth: CORNER_THICKNESS, borderLeftWidth: CORNER_THICKNESS, borderBottomLeftRadius: 4 },
   cornerBR: { bottom: 0, right: 0, borderBottomWidth: CORNER_THICKNESS, borderRightWidth: CORNER_THICKNESS, borderBottomRightRadius: 4 },
-  cameraCenter: { alignItems: 'center', gap: spacing.md },
-  cameraIcon: { fontSize: 56 },
-  cameraHint: { ...typography.caption, color: 'rgba(255,255,255,0.6)', textAlign: 'center' },
-  scanHint: { ...typography.caption, color: 'rgba(255,255,255,0.5)', marginTop: spacing.xl, textAlign: 'center' },
-  scanActions: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl, gap: spacing.sm, alignItems: 'center' },
-  simLabel: { ...typography.caption, color: 'rgba(255,255,255,0.4)' },
-  simulateBtn: {
-    backgroundColor: colors.secondary, borderRadius: borderRadius.full,
-    paddingVertical: spacing.md, paddingHorizontal: spacing.xl,
+  hintBar: {
+    paddingVertical: spacing.lg, paddingHorizontal: spacing.lg,
+    backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center',
   },
-  simulateBtnText: { ...typography.button, color: colors.textLight },
-  errorBtn: {
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)',
-    borderRadius: borderRadius.full, paddingVertical: spacing.md, paddingHorizontal: spacing.xl,
+  hintText: { ...typography.body, color: 'rgba(255,255,255,0.7)', textAlign: 'center' },
+  // Result states
+  resultContainer: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl,
   },
-  errorBtnText: { ...typography.body, color: 'rgba(255,255,255,0.6)' },
-  note: { ...typography.caption, color: 'rgba(255,255,255,0.3)', textAlign: 'center', lineHeight: 18 },
-  // Success / Error states
-  successContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl },
   successIcon: {
     width: 96, height: 96, borderRadius: borderRadius.full,
     backgroundColor: '#E8F5E9', alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg,
   },
   errorIcon: { backgroundColor: '#FFEBEE' },
-  successEmoji: { fontSize: 48 },
-  successTitle: { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.sm, textAlign: 'center' },
-  errorTitle: { color: colors.textLight },
-  successSubtitle: { ...typography.body, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.xl },
-  errorSubtitle: { color: 'rgba(255,255,255,0.8)' },
-  successCard: {
+  resultEmoji: { fontSize: 48 },
+  resultTitle: { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.sm, textAlign: 'center' },
+  resultSubtitle: { ...typography.body, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.xl },
+  lightText: { color: 'rgba(255,255,255,0.9)' },
+  resultCard: {
     width: '100%', backgroundColor: colors.surface, borderRadius: borderRadius.lg,
     padding: spacing.lg, marginBottom: spacing.xl,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
   },
-  successRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
-  successRowLast: { borderBottomWidth: 0 },
-  successLabel: { ...typography.caption, color: colors.textSecondary },
-  successValue: { ...typography.body, fontWeight: '600', color: colors.textPrimary, flex: 1, textAlign: 'right' },
-  successAmount: { color: colors.primary, fontSize: 18, fontWeight: '700' },
-  scanAgainBtn: {
+  primaryBtn: {
     backgroundColor: colors.secondary, borderRadius: borderRadius.full,
     paddingVertical: spacing.md, paddingHorizontal: spacing.xl, marginBottom: spacing.sm,
   },
-  scanAgainBtnText: { ...typography.button, color: colors.textLight },
-  backBtn2: {
+  primaryBtnText: { ...typography.button, color: colors.textLight },
+  secondaryBtn: {
     borderWidth: 1.5, borderColor: colors.border, borderRadius: borderRadius.full,
     paddingVertical: spacing.md, paddingHorizontal: spacing.xl,
   },
-  backBtn2Text: { ...typography.body, color: colors.textPrimary },
+  secondaryBtnText: { ...typography.body, color: colors.textPrimary },
+  // Permission screen
+  permissionEmoji: { fontSize: 64, marginBottom: spacing.lg },
+  permissionTitle: { ...typography.h2, color: colors.textPrimary, marginBottom: spacing.sm, textAlign: 'center' },
+  permissionBody: { ...typography.body, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.xl, lineHeight: 22 },
+  permissionBtn: {
+    backgroundColor: colors.primary, borderRadius: borderRadius.full,
+    paddingVertical: spacing.md, paddingHorizontal: spacing.xl, marginBottom: spacing.md,
+  },
+  permissionBtnText: { ...typography.button, color: colors.textLight },
+  backLink: { paddingVertical: spacing.sm },
+  backLinkText: { ...typography.body, color: colors.textSecondary },
 });

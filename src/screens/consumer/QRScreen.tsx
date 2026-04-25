@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity,
   SafeAreaView, StatusBar, Platform, Modal,
 } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 import { colors, spacing, borderRadius, typography } from '../../theme';
 
 type Offer = {
@@ -17,12 +18,14 @@ type Offer = {
 type Props = {
   offer: Offer;
   orderId: string;
+  qrToken?: string; // UUID del backend — si no llega, usa el orderId
   onGoHome: () => void;
   onScanSuccess?: (orderId: string) => void;
   onRateOrder?: (orderId: string, rating: number) => void;
 };
 
-export default function QRScreen({ offer, orderId, onGoHome, onScanSuccess, onRateOrder }: Props) {
+export default function QRScreen({ offer, orderId, qrToken, onGoHome, onScanSuccess, onRateOrder }: Props) {
+  const qrValue = qrToken ?? orderId;
   const [timeLeft, setTimeLeft] = useState('');
   const [scanned, setScanned] = useState(false);
   const [rating, setRating] = useState(0);
@@ -64,27 +67,7 @@ export default function QRScreen({ offer, orderId, onGoHome, onScanSuccess, onRa
       {/* QR placeholder */}
       <View style={styles.qrContainer}>
         <View style={styles.qrBox}>
-          {/* QR simulado con grid */}
-          <View style={styles.qrGrid}>
-            {Array.from({ length: 7 }).map((_, row) =>
-              Array.from({ length: 7 }).map((_, col) => {
-                const isCorner =
-                  (row < 2 && col < 2) || (row < 2 && col > 4) || (row > 4 && col < 2);
-                const isBorder =
-                  (row === 0 || row === 6 || col === 0 || col === 6) ||
-                  (row < 3 && col < 3) || (row < 3 && col > 3) || (row > 3 && col < 3);
-                return (
-                  <View
-                    key={`${row}-${col}`}
-                    style={[
-                      styles.qrCell,
-                      (isCorner || (row + col) % 2 === 0) && styles.qrCellFilled,
-                    ]}
-                  />
-                );
-              })
-            )}
-          </View>
+          <QRCode value={qrValue} size={160} color={colors.textPrimary} backgroundColor="white" />
           <Text style={styles.qrOrderId}>#{orderId}</Text>
         </View>
 
@@ -216,15 +199,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     width: 200,
   },
-  qrGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    width: 140,
-    height: 140,
-    marginBottom: spacing.sm,
-  },
-  qrCell: { width: 20, height: 20, backgroundColor: 'transparent' },
-  qrCellFilled: { backgroundColor: colors.textPrimary },
   qrOrderId: { ...typography.caption, color: colors.textSecondary, fontWeight: '600', letterSpacing: 1 },
   timerBox: {
     backgroundColor: colors.secondary,

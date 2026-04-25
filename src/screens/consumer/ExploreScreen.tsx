@@ -11,7 +11,9 @@ import {
   StatusBar,
   Platform,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
+import * as Location from 'expo-location';
 
 const ZONES = [
   'Altamira', 'La Castellana', 'Las Mercedes', 'Chacao', 'El Rosal',
@@ -138,6 +140,29 @@ export default function ExploreScreen({ onOfferPress, onLoginPress, onProfilePre
   const [location, setLocation] = useState('Las Mercedes');
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [zoneSearch, setZoneSearch] = useState('');
+  const [locating, setLocating] = useState(false);
+
+  const handleGPS = async () => {
+    setLocating(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocating(false);
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const [place] = await Location.reverseGeocodeAsync({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      });
+      const zone = place?.district ?? place?.subregion ?? place?.city ?? 'Mi ubicación';
+      setLocation(zone);
+    } catch {
+      // Si falla, mantiene la zona manual
+    } finally {
+      setLocating(false);
+    }
+  };
 
   const filtered = MOCK_OFFERS.filter((o) => {
     const matchesSearch =
@@ -223,10 +248,18 @@ export default function ExploreScreen({ onOfferPress, onLoginPress, onProfilePre
         <View style={styles.header}>
           <View>
             <Text style={styles.locationLabel}>Ofertas cerca de</Text>
-            <TouchableOpacity style={styles.locationRow} onPress={() => setShowLocationModal(true)}>
-              <Text style={styles.locationText}>📍 Caracas, {location}</Text>
-              <Text style={styles.locationChevron}>›</Text>
-            </TouchableOpacity>
+            <View style={styles.locationControls}>
+              <TouchableOpacity style={styles.locationRow} onPress={() => setShowLocationModal(true)}>
+                <Text style={styles.locationText}>📍 {location}</Text>
+                <Text style={styles.locationChevron}>›</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.gpsBtn} onPress={handleGPS} disabled={locating}>
+                {locating
+                  ? <ActivityIndicator size={14} color={colors.primary} />
+                  : <Text style={styles.gpsBtnText}>GPS</Text>
+                }
+              </TouchableOpacity>
+            </View>
           </View>
           {isLoggedIn ? (
             <TouchableOpacity style={styles.avatarBtn} onPress={onProfilePress}>
@@ -396,10 +429,30 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textSecondary,
   },
+  locationControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
+  },
+  gpsBtn: {
+    backgroundColor: colors.primary + '18',
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    minWidth: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gpsBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+    letterSpacing: 0.5,
   },
   locationText: {
     ...typography.h3,
