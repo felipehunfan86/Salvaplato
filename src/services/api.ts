@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // En producción: URL de Netlify. En desarrollo: emulador local.
-const PROD_URL = 'https://salvaplato-api.netlify.app/api'; // ← cambia al dominio real tras deploy
+const PROD_URL = 'https://69ed4a8006e31cb7c8d5828c--salvaplato-api.netlify.app/api';
 const DEV_ANDROID = 'http://10.0.2.2:3000/api';           // emulador Android → localhost
 const DEV_IOS = 'http://localhost:3000/api';               // simulador iOS
 
