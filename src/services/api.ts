@@ -1,16 +1,7 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// En producción: URL de Netlify. En desarrollo: emulador local.
-const PROD_URL = 'https://69ed4a8006e31cb7c8d5828c--salvaplato-api.netlify.app/api';
-const DEV_ANDROID = 'http://10.0.2.2:3000/api';           // emulador Android → localhost
-const DEV_IOS = 'http://localhost:3000/api';               // simulador iOS
-
-const isDev = __DEV__;
-
-export const API_URL = isDev
-  ? Platform.select({ android: DEV_ANDROID, ios: DEV_IOS, default: DEV_IOS })!
-  : PROD_URL;
+export const API_URL = 'https://69ed4a8006e31cb7c8d5828c--salvaplato-api.netlify.app/api';
 
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
