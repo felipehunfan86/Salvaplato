@@ -1,31 +1,119 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   SafeAreaView, StatusBar, Platform, ScrollView, KeyboardAvoidingView,
+  ActivityIndicator, Alert,
 } from 'react-native';
 import { colors, spacing, borderRadius, typography } from '../../theme';
 import ZoneAutocomplete from '../../components/ZoneAutocomplete';
+import { apiRequest, getSavedUser } from '../../services/api';
 
 type Props = {
   onBack: () => void;
   onLogout: () => void;
 };
 
+type RestaurantData = {
+  id: string;
+  name: string;
+  phone: string;
+  address: string;
+  cuisine_type: string;
+  schedule: string;
+  description: string;
+  rif: string;
+  status: string;
+};
+
 export default function RestaurantProfileScreen({ onBack, onLogout }: Props) {
+  const [restaurant, setRestaurant] = useState<RestaurantData | null>(null);
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
-  const [businessName, setBusinessName] = useState('Pizzería Don Pepe');
-  const [phone, setPhone] = useState('+58 412 000 0000');
-  const [address, setAddress] = useState('Av. Principal, CC Sambil, local 5-B');
-  const [zone, setZone] = useState('Caracas, Chacao');
-  const [schedule, setSchedule] = useState('Lun-Vie 11am-9pm, Sáb 12pm-8pm');
-  const [description, setDescription] = useState('La mejor pizza artesanal de Caracas. Masa fresca cada día.');
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const handleSave = () => {
-    setEditing(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [zone, setZone] = useState('');
+  const [schedule, setSchedule] = useState('');
+  const [description, setDescription] = useState('');
+
+  const [totalSales, setTotalSales] = useState(0);
+  const [totalRevenue, setTotalRevenue] = useState(0);
+
+  const load = useCallback(async () => {
+    try {
+      const [r, orders, user] = await Promise.all([
+        apiRequest<RestaurantData>('/restaurants/mine'),
+        apiRequest<any[]>('/orders/restaurant'),
+        getSavedUser(),
+      ]);
+      setRestaurant(r);
+      setName(r.name);
+      setPhone(r.phone ?? '');
+      setAddress(r.address ?? '');
+      setSchedule(r.schedule ?? '');
+      setDescription(r.description ?? '');
+      setEmail(user?.email ?? '');
+      const completed = orders.filter(o => o.status === 'completed');
+      setTotalSales(completed.length);
+      setTotalRevenue(completed.reduce((s, o) => s + (o.total_amount ?? 0), 0));
+    } catch {
+      Alert.alert('Error', 'No se pudo cargar el perfil del local');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await apiRequest('/restaurants/mine', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: name.trim() || undefined,
+          phone: phone.trim() || undefined,
+          address: address.trim() || undefined,
+          schedule: schedule.trim() || undefined,
+          description: description.trim() || undefined,
+        }),
+      });
+      setRestaurant(prev => prev ? { ...prev, name, phone, address, schedule, description } : prev);
+      setEditing(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (e: any) {
+      Alert.alert('Error', e.message ?? 'No se pudieron guardar los cambios');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+            <Text style={styles.backBtnText}>‹</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Perfil del local</Text>
+          <View style={{ width: 48 }} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const displayName = name || restaurant?.name || '?';
+  const statusLabel = restaurant?.status === 'approved' ? '✓ Local verificado' : '⏳ Pendiente de verificación';
+  const statusStyle = restaurant?.status === 'approved' ? styles.statusVerified : styles.statusPending;
+  const statusTextStyle = restaurant?.status === 'approved' ? styles.statusTextVerified : styles.statusTextPending;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -37,86 +125,56 @@ export default function RestaurantProfileScreen({ onBack, onLogout }: Props) {
             <Text style={styles.backBtnText}>‹</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Perfil del local</Text>
-          <TouchableOpacity onPress={() => editing ? handleSave() : setEditing(true)}>
-            <Text style={styles.editBtn}>{editing ? 'Guardar' : 'Editar'}</Text>
+          <TouchableOpacity onPress={editing ? handleSave : () => setEditing(true)} disabled={saving}>
+            {saving
+              ? <ActivityIndicator size="small" color={colors.primary} />
+              : <Text style={styles.editBtn}>{editing ? 'Guardar' : 'Editar'}</Text>
+            }
           </TouchableOpacity>
         </View>
 
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
 
-          {/* Avatar + name */}
           <View style={styles.avatarSection}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{businessName.charAt(0).toUpperCase()}</Text>
+              <Text style={styles.avatarText}>{displayName.charAt(0).toUpperCase()}</Text>
             </View>
             {editing ? (
               <TextInput
                 style={styles.nameInput}
-                value={businessName}
-                onChangeText={setBusinessName}
+                value={name}
+                onChangeText={setName}
                 autoCorrect={false}
               />
             ) : (
-              <Text style={styles.businessName}>{businessName}</Text>
+              <Text style={styles.businessName}>{displayName}</Text>
             )}
             <View style={styles.categoryTag}>
-              <Text style={styles.categoryTagText}>🍕 Pizzería</Text>
+              <Text style={styles.categoryTagText}>{restaurant?.cuisine_type ?? ''}</Text>
             </View>
-            <View style={[styles.statusTag, styles.statusVerified]}>
-              <Text style={styles.statusTagText}>✓ Local verificado</Text>
+            <View style={[styles.statusTag, statusStyle]}>
+              <Text style={[styles.statusTagText, statusTextStyle]}>{statusLabel}</Text>
             </View>
           </View>
 
-          {/* Stats */}
           <View style={styles.statsRow}>
-            <StatCard value="47" label="Ventas totales" />
-            <StatCard value="$214" label="Ingresos" />
-            <StatCard value="18.8 kg" label="Rescatados" />
+            <StatCard value={String(totalSales)} label="Ventas totales" />
+            <StatCard value={`$${totalRevenue.toFixed(0)}`} label="Ingresos" />
           </View>
 
-          {/* Info section */}
           <Text style={styles.sectionTitle}>Información del local</Text>
 
-          <InfoField
-            label="Teléfono"
-            value={phone}
-            editing={editing}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-          />
-          <InfoField
-            label="Dirección"
-            value={address}
-            editing={editing}
-            onChangeText={setAddress}
-          />
-
-          {editing ? (
-            <ZoneAutocomplete label="Zona / Sector" value={zone} onChange={setZone} />
-          ) : (
-            <InfoField label="Zona" value={zone} editing={false} onChangeText={() => {}} />
-          )}
-
-          <InfoField
-            label="Horario de atención"
-            value={schedule}
-            editing={editing}
-            onChangeText={setSchedule}
-          />
-          <InfoField
-            label="Descripción"
-            value={description}
-            editing={editing}
-            onChangeText={setDescription}
-            multiline
-          />
+          <InfoField label="Teléfono" value={phone} editing={editing} onChangeText={setPhone} keyboardType="phone-pad" />
+          <InfoField label="Dirección" value={address} editing={editing} onChangeText={setAddress} />
+          <InfoField label="Horario de atención" value={schedule} editing={editing} onChangeText={setSchedule} />
+          <InfoField label="Descripción" value={description} editing={editing} onChangeText={setDescription} multiline />
 
           <Text style={styles.sectionTitle}>Cuenta</Text>
 
           <View style={styles.accountCard}>
-            <AccountRow label="Correo" value="donpepe@pizza.com" icon="📧" />
-            <AccountRow label="RIF" value="J-12345678-9" icon="📄" />
-            <AccountRow label="Estado" value="Verificado" icon="✅" />
+            <AccountRow label="Correo" value={email} icon="📧" />
+            <AccountRow label="RIF" value={restaurant?.rif ?? '—'} icon="📄" />
+            <AccountRow label="Estado" value={restaurant?.status === 'approved' ? 'Verificado' : 'Pendiente'} icon={restaurant?.status === 'approved' ? '✅' : '⏳'} />
           </View>
 
           {saved && (
@@ -167,7 +225,7 @@ function InfoField({ label, value, editing, onChangeText, keyboardType, multilin
           autoCorrect={false}
         />
       ) : (
-        <Text style={styles.infoValue}>{value}</Text>
+        <Text style={styles.infoValue}>{value || '—'}</Text>
       )}
     </View>
   );
@@ -196,6 +254,7 @@ const styles = StyleSheet.create({
   backBtnText: { fontSize: 28, color: colors.textPrimary, lineHeight: 32 },
   headerTitle: { ...typography.h3, color: colors.textPrimary },
   editBtn: { ...typography.body, color: colors.primary, fontWeight: '700' },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
   avatarSection: { alignItems: 'center', marginBottom: spacing.lg },
   avatar: {
@@ -212,7 +271,10 @@ const styles = StyleSheet.create({
   categoryTagText: { ...typography.caption, fontWeight: '600', color: '#E65100' },
   statusTag: { borderRadius: borderRadius.full, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
   statusVerified: { backgroundColor: '#E8F5E9' },
-  statusTagText: { ...typography.caption, fontWeight: '600', color: colors.primary },
+  statusPending: { backgroundColor: '#FFF8E1' },
+  statusTagText: { ...typography.caption, fontWeight: '600' },
+  statusTextVerified: { color: colors.primary },
+  statusTextPending: { color: '#F57F17' },
   statsRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
   statCard: {
     flex: 1, backgroundColor: colors.surface, borderRadius: borderRadius.lg,
@@ -249,9 +311,7 @@ const styles = StyleSheet.create({
     padding: spacing.md, alignItems: 'center', marginBottom: spacing.md,
   },
   savedText: { ...typography.body, color: colors.primary, fontWeight: '600' },
-  dangerZone: {
-    borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.lg, marginTop: spacing.lg,
-  },
+  dangerZone: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.lg, marginTop: spacing.lg },
   dangerTitle: { ...typography.caption, fontWeight: '600', color: colors.textSecondary, marginBottom: spacing.md },
   logoutBtn: {
     borderWidth: 1.5, borderColor: colors.error, borderRadius: borderRadius.full,
