@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import WelcomeScreen from './src/screens/auth/WelcomeScreen';
 import LoginScreen from './src/screens/auth/LoginScreen';
 import RegisterScreen from './src/screens/auth/RegisterScreen';
+import ForgotPasswordScreen from './src/screens/auth/ForgotPasswordScreen';
 import ExploreScreen from './src/screens/consumer/ExploreScreen';
 import OfferDetailScreen from './src/screens/consumer/OfferDetailScreen';
 import PurchaseConfirmScreen from './src/screens/consumer/PurchaseConfirmScreen';
@@ -28,7 +29,7 @@ import {
 } from './src/services/api';
 
 type Screen =
-  | 'welcome' | 'login' | 'register'
+  | 'welcome' | 'login' | 'register' | 'forgotPassword'
   | 'explore' | 'offerDetail' | 'purchaseConfirm' | 'payment' | 'qr'
   | 'activeOrders'
   | 'profile' | 'editProfile' | 'notifications' | 'location' | 'changePassword'
@@ -202,13 +203,17 @@ export default function App() {
   };
 
   // ── Auth ──────────────────────────────────────────────────────────────────
+  if (screen === 'forgotPassword') {
+    return <ForgotPasswordScreen onBack={() => setScreen('login')} />;
+  }
+
   if (screen === 'login') {
     return (
       <LoginScreen
         onLogin={handleAuthSuccess}
         onRegister={() => setScreen('register')}
         onBack={() => setScreen(selectedOffer ? 'offerDetail' : 'welcome')}
-        onForgotPassword={() => {}}
+        onForgotPassword={() => setScreen('forgotPassword')}
       />
     );
   }
