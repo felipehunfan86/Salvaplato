@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export const API_URL = 'https://69ed4a8006e31cb7c8d5828c--salvaplato-api.netlify.app/api';
+export const API_URL = 'https://salvaplato-api.netlify.app/api';
 
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
