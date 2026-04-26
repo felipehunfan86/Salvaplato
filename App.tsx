@@ -22,6 +22,7 @@ import RestaurantOrdersScreen from './src/screens/restaurant/RestaurantOrdersScr
 import RestaurantQRScannerScreen from './src/screens/restaurant/RestaurantQRScannerScreen';
 import RestaurantProfileScreen from './src/screens/restaurant/RestaurantProfileScreen';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import {
   apiRequest, clearAuth, getSavedUser, StoredUser, AppOffer,
@@ -41,6 +42,8 @@ function formatDate(d: Date) {
 }
 
 async function registerPushToken() {
+  // Push notifications no están soportadas en Expo Go desde SDK 53
+  if (Constants.appOwnership === 'expo') return;
   try {
     const { status } = await Notifications.requestPermissionsAsync();
     if (status !== 'granted') return;
