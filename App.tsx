@@ -82,10 +82,16 @@ export default function App() {
 
   // Auto-login al iniciar
   useEffect(() => {
-    getSavedUser().then(user => {
+    getSavedUser().then(async (user) => {
       if (user) {
         setCurrentUser(user);
-        setScreen('explore');
+        try {
+          const restaurant = await apiRequest<{ id: string; name: string }>('/restaurants/mine');
+          setRestaurantName(restaurant.name);
+          setScreen('restaurantDashboard');
+        } catch {
+          setScreen('explore');
+        }
       }
     });
   }, []);
